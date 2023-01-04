@@ -1,0 +1,4 @@
+*.pyc
+*.lic
+get_error.py
+connect.py
