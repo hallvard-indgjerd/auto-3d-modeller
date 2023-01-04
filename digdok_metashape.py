@@ -1,3 +1,5 @@
+#!/usr/bin/python
+#
 # Fully automated photogrammetry workflow using Agisoft Metashape's python librares
 #
 # Written by Hallvard R. Indgjerd, 18.12.2022
@@ -7,29 +9,464 @@
 
 import sys
 import os
+import glob
 from datetime import datetime
 import Metashape
+import psycopg2
+from dbconfig import config
 import math
+import csv
 
 # Variables
-doc = Metashape.app.document
-found_major_version = ".".join(Metashape.app.version.split('.')[:2])
-csv = Metashape.ReferenceFormatCSV #format of file is comma delimited
+# doc = Metashape.app.document
+doc = Metashape.Document()
+version = Metashape.app.version
+found_major_version = ".".join(version.split('.')[:2])
+csvformat = Metashape.ReferenceFormatCSV #format of file is comma delimited
 
-##Selection Percentages
-RU_Percent = 20
-PA_Percent = 20
-RE_Percent = 20
+#Modes: db, standalone
+mode = "db" 
 
-## Selection Thresholds
-RU_Threshold = 10
-PA_Threshold = 5
-RE_Threshold = 0.9
+def vars(uuid):
+  # Declaring vars as global:
+  global setting_group
+  ## Workflow
+  global est_iq_bool
+  global align_bool
+  global poptargets_bool
+  global uncheckmarkers_bool
+  global alignbbox_bool
+  global optimizealignment_bool
+  global err_red_bool
+  global depthmap_bool
+  global densecloud_bool
+  global mesh_bool
+  global texture_bool
+  global dem_bool
+  global ortho_bool
+  ## Image quality
+  global iq_threshold
+  ## Error correction Percentages
+  global RU_Percent
+  global PA_Percent
+  global RE_Percent
+  ## Error correction Thresholds
+  global RU_Threshold
+  global PA_Threshold
+  global RE_Threshold
+  ## Depthmaps settings
+  global depthmap_quality
+  global depthmap_filter
+  ## CRS
+  global crs
+  ## Image alignment settings
+  global keypoint_limit
+  global tiepoint_limit
+  global generic_preselection_bool
+  global reference_preselection_bool
+  ## UV and Texture settings
+  global uv_pages
+  global texture_size
+  global ghosting_filter_bool
+  global blending_mode
+  global texture_type
+  global fill_holes_bool
+  ## Model/mesh settings
+  global surface_type
+  global interpolation
+  global face_count_custom
+  global source_data
+  global vertex_colors_bool
+  global vertex_confidence_bool
+  ##DEM settings
+  global dem_datasource
+  global dem_interpolation
+  global dem_resolution
+  ## Orthos settings
+  global ortho_surfacedata
+  global ortho_blending_mode
+  global ortho_fill_holes_bool
+  global ortho_ghosting_filter_bool
+  global ortho_cull_faces_bool
+  global ortho_refine_seamlines_bool
+  global ortho_resolution
+
+
+  # If db mmode, get vars from DB
+  if mode == "db":
+    query = (
+      "SELECT settings.*"
+      "FROM new.process_settings settings "
+      "JOIN new.process_status proc ON proc.settings_uuid = settings.uuid "
+      "WHERE proc.uuid = '" + uuid + "';"
+      )
+    settings = dbconnection(query, "select_one")
+  
+    print("Settings retrieved: ")
+    print(settings)
+  
+    setting_group = settings[1]
+  
+    ## Workflow
+    est_iq_bool = settings[2]
+    align_bool = settings[3]
+    poptargets_bool = settings[4]
+    uncheckmarkers_bool = settings[5]
+    alignbbox_bool = settings[6]
+    optimizealignment_bool = settings[7]
+    err_red_bool = settings[8]
+    depthmap_bool = settings[9]
+    densecloud_bool = settings[10]
+    mesh_bool = settings[11]
+    texture_bool = settings[12]
+    dem_bool = settings[13]
+    ortho_bool = settings[14]
+  
+    ## Image quality
+    iq_threshold = settings[15]
+  
+    ## Error correction Percentages
+    RU_Percent = settings[16]
+    PA_Percent = settings[17]
+    RE_Percent = settings[18]
+  
+    ## Error correction Thresholds
+    RU_Threshold = settings[19]
+    PA_Threshold = settings[20]
+    RE_Threshold = settings[21]
+  
+    ## Depthmaps settings
+    depthmap_quality = settings[22]
+    depthmap_filter = settings[23]
+  
+    ## CRS
+    crs = settings[24]
+  
+    ## Image alignment settings
+    keypoint_limit = settings[25]
+    tiepoint_limit = settings[26]
+    generic_preselection_bool = settings[27]
+    reference_preselection_bool = settings[28]
+
+    ## UV and Texture settings
+    uv_pages = settings[29]
+    texture_size = settings[30]
+    ghosting_filter_bool = settings[31]
+    blending_mode = settings[32]
+    texture_type = settings[33]
+    fill_holes_bool = settings[34]
+
+    ## Model/mesh settings
+    surface_type = settings[35]
+    interpolation = settings[36]
+    face_count_custom = settings[37]
+    source_data = settings[38]
+    vertex_colors_bool = settings[39]
+    vertex_confidence_bool = settings[40]
+
+    ##DEM settings
+    dem_datasource = settings[41]
+    dem_interpolation = settings[42]
+    dem_resolution = settings[43]
+
+    ## Orthos settings
+    ortho_surfacedata = settings[44]
+    ortho_blending_mode = settings[45]
+    ortho_fill_holes_bool = settings[46]
+    ortho_ghosting_filter_bool = settings[47]
+    ortho_cull_faces_bool = settings[48]
+    ortho_refine_seamlines_bool = settings[49]
+    ortho_resolution = settings[50]
+
+
+  # If standalone mode, set vars here 
+  else:
+    setting_group = "Default manual settings (HRI 27.12.22)"
+
+    ## Workflow
+    est_iq_bool = True
+    align_bool = True
+    poptargets_bool = True
+    uncheckmarkers_bool = True
+    alignbbox_bool = True
+    optimizealignment_bool = True
+    err_red_bool = True
+    depthmap_bool = True
+    densecloud_bool = False
+    mesh_bool = True
+    texture_bool = True
+    dem_bool = True
+    ortho_bool = True
+  
+    ## Image quality
+    iq_threshold = 0.6
+  
+    ## Error correction Percentages
+    RU_Percent = 20
+    PA_Percent = 20
+    RE_Percent = 20
+  
+    ## Error correction Thresholds
+    RU_Threshold = 10
+    PA_Threshold = 5
+    RE_Threshold = 0.9
+  
+    ##CRS
+    crs = 32630
+  
+    ## Image alignment settings
+    keypoint_limit = 40000
+    tiepoint_limit = 10000
+    generic_preselection_bool = True
+    reference_preselection_bool = True
+
+    ## UV and Texture settings
+    uv_pages = 2
+    texture_size = 4096
+    ghosting_filter_bool = True
+    blending_mode = "MosaicBlending"
+    texture_type = "DiffuseMap"
+    fill_holes_bool = True
+
+    ## Model/mesh settings
+    surface_type = "Arbitrary"
+    interpolation = "EnabledInterpolation"
+    face_count_custom = 0
+    source_data = "DepthMapsData"
+    vertex_colors_bool = True
+    vertex_confidence_bool = True
+
+    ##DEM settings
+    dem_datasource = "DenseCloudData"
+    dem_interpolation = "EnabledInterpolation"
+    dem_resolution = 0
+
+    ## Orthos settings
+    ortho_surfacedata = "ElevationData"
+    ortho_blending_mode = "MosaicBlending"
+    ortho_fill_holes_bool = True
+    ortho_ghosting_filter_bool = False
+    ortho_cull_faces_bool = False
+    ortho_refine_seamlines_bool = False
+    ortho_resolution = 0
+
+
+  ## Print out settings
+  print()
+  print("Setting group: " + setting_group)
+  print()
+  print("Estimate image quality: " + str(est_iq_bool))
+  print("Image quality threshold: " + str(iq_threshold))
+  print()
+  print("Align images: " + str(align_bool))
+  print("Keypoint limit: " + str(keypoint_limit))
+  print("Tiepoint limit: " + str(tiepoint_limit))
+  print("Generic preselection: " + str(generic_preselection_bool))
+  print("Reference preselection: " + str(reference_preselection_bool))
+  print()
+  print("Populate targets: " + str(poptargets_bool))
+  print("CRS: EPSG::" + str(crs))
+  print()  
+  print("Uncheck markers: " + str(uncheckmarkers_bool))
+  print("Align bounding box: " + str(alignbbox_bool))
+  print("Optimize alignment: " + str(optimizealignment_bool))
+  print("Error reduction: " + str(err_red_bool))
+  print("RU percent: " + str(RU_Percent))
+  print("RU threshold: " + str(RU_Threshold))
+  print("PA percent: " + str(PA_Percent))
+  print("PA threshold: " + str(PA_Threshold))
+  print("RE percent: " + str(RE_Percent))
+  print("RE threshold: " + str(RE_Threshold))  
+  print()
+  print("Build depthmaps: " + str(depthmap_bool))
+  print("Depth map quality: " + depthmap_quality)
+  print("Depth map filter: " + depthmap_filter)
+  print()  
+  print("Build dense cloud: " + str(densecloud_bool))
+  print("Build mesh: " + str(mesh_bool))
+  print()
+  print("Build texture: " + str(texture_bool))
+  print("UV page count: " + str(uv_pages))
+  print("Belnding mode: " + str(blending_mode))
+  print("Texture size: " + str(texture_size))
+  print("Texture type: " + str(texture_type))
+  print("Enable ghosting filter: " + str(ghosting_filter_bool))
+  print("Enable hole filling: " + str(fill_holes_bool))
+  print()
+  print("Build DEM: " + str(dem_bool))
+  print("DEM datasource: " + str(dem_datasource))
+  print("DEM interpolation: " + str(dem_interpolation))
+  print("DEM resolution: " + str(dem_resolution))
+  print()
+  print("Build orthomosaic: " + str(ortho_bool))
+  print("Surface data: " + str(ortho_surfacedata))
+  print("Blending mode: " + str(ortho_blending_mode))
+  print("Enable hole filling: " + str(ortho_fill_holes_bool))
+  print("Enable ghosting filter: " + str(ortho_ghosting_filter_bool))
+  print("Enable back-face culling: " + str(ortho_cull_faces_bool))
+  print("Refine seamlines based on image content: " + str(ortho_refine_seamlines_bool))
+  print("Ortho resolution: " + str(ortho_resolution))
+  print()
+
+def dbconnection(query, type):
+  """ Connect to the PostgreSQL database server """
+  connection = None
+  try:
+      # read connection parameters
+      params = config()
+      # connect to the PostgreSQL server
+      print('Connecting to the PostgreSQL database...')
+      connection = psycopg2.connect(**params)        
+      # create a cursor
+      cursor = connection.cursor()        
+      # Execute query
+      cursor.execute(query)
+      if type == "insert":
+        connection.commit()
+        result = cursor.fetchall()
+        count = cursor.rowcount
+        print(count, "record(s) inserted.")
+        if result:
+          return result
+      elif type == "update":
+        connection.commit()
+        result = cursor.fetchall()
+        count = cursor.rowcount
+        print(count, "record(s) updated.")
+        if result:
+          return result
+      elif type == "select_one":
+        result = cursor.fetchone()
+        if result:
+          print("One row returned.")
+          return result
+        else:
+          print("No records found.")
+      elif type == "select_all":
+        result = cursor.fetchall()
+        if result:
+          return result
+        else:
+          print("No records found.")  
+  except (Exception, psycopg2.DatabaseError) as error:
+      print(error)
+  finally:
+    if connection:
+      cursor.close()
+      connection.close()
+
+#-----------------------------------------------------------------
+
+def update_status(uuid, step, status):
+  if mode == "db":
+    print("Updating " + step + " status to '" + status + "'. \n")
+    query = (
+    "UPDATE new.process_status "
+    "SET " + step + " = '" + status + "' "
+    "WHERE uuid = '" + uuid + "';"
+    )
+    dbconnection(query, "update")
+
+#-----------------------------------------------------------------
+
+def update_processing(uuid, step, value):
+  if mode == "db":
+    query = (
+    "UPDATE new.processing "
+    "SET " + step + " = " + str(value) + " "
+    "WHERE uuid = '" + uuid + "';"
+    )
+    dbconnection(query, "update")
+#-----------------------------------------------------------------
+
+def get_status(uuid, step):
+  if mode == "db":
+    query = (
+    "SELECT " + step + " "
+    "FROM new.process_status "
+    "WHERE uuid = '" + uuid + "';"
+    )
+    status = dbconnection(query, "select_one")
+    return status[0]
+
+#-----------------------------------------------------------------
+
+def set_software():
+  if mode == "db":
+
+    query = (
+    "SELECT uuid "
+    "FROM new.software "
+    "WHERE software_name = 'Metashape' and software_version = '" + version + "';"
+    )
+    software_uuid = dbconnection(query, "select_one")
+
+    if not software_uuid:
+      query = (
+        "INSERT INTO new.software (company, software_name, software_version, software_type) "
+        "VALUES ('Agisoft'::varchar,'Metashape'::varchar,'" + version + "'::varchar, 'Photogrammetry'::varchar) "
+        "RETURNING uuid"
+        )
+      software_uuid = dbconnection(query, "insert")
+    return software_uuid[0]
+
+
+#-----------------------------------------------------------------
+
+def set_processing(uuid):
+  if mode == "db":
+    # Get uuid for current software version, if none, create the entry first:
+    software_uuid = set_software()
+
+    # Check if a processing entry linked to the capture and processing status entries exist
+    query = (
+    "SELECT proc.uuid "
+    "FROM new.processing proc "
+    "JOIN new.capture_processing_link cp ON cp.processing_uuid = proc.uuid "
+    "JOIN new.capture cap ON cap.uuid = cp.capture_uuid "
+    "JOIN new.process_status ps ON ps.capture_uuid = cap.uuid "
+    "WHERE ps.uuid = '" + uuid + "'::uuid"
+    )
+    processing_uuid = dbconnection(query, "select_one")[0]
+    print("processing_uuid: " + str(processing_uuid))
+    print("software_uuid: " + software_uuid)
+
+    if not processing_uuid:
+      # If the processing entry doesn't exist (if it's not linked, we assume it doesn't exist..), create it:
+      query = (
+        "INSERT INTO new.processing (software, processed_on) "
+        "VALUES ( ARRAY ['" + software_uuid + "'::uuid], CURRENT_DATE) "
+        "RETURNING uuid;"
+        )
+      # And link the newly created processing entry to the current capture entry via link-table.
+      processing_uuid = dbconnection(query, "insert")
+      query = (
+        "INSERT INTO new.capture_processing_link (capture_uuid, processing_uuid) "
+        "SELECT cap.uuid, '" + processing_uuid + "'::uuid "
+        "FROM new.capture cap "
+        "JOIN new.process_status ps ON ps.capture_uuid = cap.uuid "
+        "WHERE ps.uuid = '" + uuid + "';"
+        )
+      dbconnection(query, "insert")
+    else:
+      # If the processing entry already exists, update it with the current software info
+      query = (
+        "UPDATE new.processing "
+        "SET software = (SELECT ARRAY_AGG(DISTINCT e) FROM UNNEST(software || '{" + software_uuid + "}') e) "
+        "WHERE new.processing.uuid = '" + processing_uuid + "' ;"
+        )
+      dbconnection(query, "update")
+
+
+    return processing_uuid
+
+#-----------------------------------------------------------------
 
 def pickfoldernamechunk():
   # Create a new chunk named from a selected a folder and add all photos from that folder
 
   #Select folder
+  global path
   path = Metashape.app.getExistingDirectory("Select root folder for projects.")
   backslash = "/" # Metashape now uses slash (/) not backslash (\).
   print (path) #display full path and folder name in console
@@ -62,43 +499,104 @@ def pickfoldernamechunk():
   date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
   #area = Metashape.app.getString(label = "Area mapped (for filename):", value = "Room")
   project_name = folder + "_" + date.strftime("%d%m%y") + ".psx"
-#  doc.save(path + "/" + project_name)
+  doc.save(path + "/" + project_name)
+    
+#-----------------------------------------------------------------
+
+def loadfromdb():
+  # Create a new chunk named from a selected a folder and add all photos from that folder
+  query = "SELECT * FROM new.view_process_location"
+  capture = dbconnection(query, "select_one")
+
+  if not capture:
+    sys.exit("No models to process. Exiting.")
+
+  #Select folder
+  global path
+  path = capture[1]
+  uuid = capture[0]
+  folder = os.path.basename(path)
+  backslash = "/" # Metashape now uses slash (/) not backslash (\).
+  print (path) #display full path and folder name in console
+  bkslno = path.rfind(backslash)+1
+  pathlen = len(path)
+
+  # Check for existing project and open
+  existing_projects = glob.glob(path + '/' + folder + '_*.psx')
+  if get_status(uuid, "status") == "processing":
+    if existing_projects:
+      doc.open(existing_projects[0], read_only=False, ignore_lock=True)
+      return uuid
+
+  # Set status
+  update_status(uuid, "status", "processing")
+
+  subfolders = os.listdir(path)
+  for subfolder in subfolders:
+    if os.path.isdir(path):
+      print ('Create new chunk named "' + folder + '"')
+      #create new chunk named after folder
+      chunk = doc.addChunk()
+      chunk.label = folder
+
+      #load all images from specified folder into new chunk
+      image_list = os.listdir(path + "/Photos")
+      photo_list = list()
+      for photo in image_list:
+        if ("jpg" or "jpeg" or "JPG" or "JPEG") in photo.lower():
+          photo_list.append(path + "/Photos/" + photo)
+      chunk.addPhotos(photo_list)
+
+  #remove empty chunks
+  for chunk in list(doc.chunks):
+    if not len(chunk.cameras):
+      doc.remove(chunk)
+  
+  #save project
+  camera = chunk.cameras[0]
+  date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
+  #area = Metashape.app.getString(label = "Area mapped (for filename):", value = "Room")
+  project_name = folder + "_" + date.strftime("%d%m%y") + ".psx"
+  doc.save(path + "/" + project_name)
+  return uuid
     
 #-----------------------------------------------------------------
 
 # Calculate image quality and disable images with quality less than a specified variable.
-def estimagequality():
+def estimagequality(threshold):
 
     # Calculate image quality and disable images with quality less than a specified variable.
   #chunk = doc.chunk
     
-  tlabel = 'Quality theshold'
+  #tlabel = 'Quality theshold'
   #threshold = Metashape.app.getFloat(tlabel, value=0.6) # photos with image quality below this amount will be disabled.
-  threshold = 0.6
-
-  for chnk in doc.chunks:
-    #camera = chnk.cameras
-    #chnk.estimateImageQuality(camera)
-    camerasniq = [camera for camera in chnk.cameras
+  #threshold = iq_threshold
+  print("")
+  print("Estimating image quality.")
+  for chunk in doc.chunks:
+    #camera = chunk.cameras
+    #chunk.estimateImageQuality(camera)
+    camerasniq = [camera for camera in chunk.cameras
       if 'Image/Quality' not in camera.meta]
 
     if len(camerasniq) > 0:
       print('Test OK!')
-      print(found_major_version)
+      #print(found_major_version)
       if found_major_version == '1.5':
-        chnk.estimateImageQuality(camerasniq)
+        chunk.estimateImageQuality(camerasniq)
       else:
-        chnk.analyzePhotos(camerasniq)
+        chunk.analyzePhotos(camerasniq)
 
-    for i in range(0, len(chnk.cameras)):
+    for i in range(0, len(chunk.cameras)):
       print('photo ' + str(i))
-      camera = chnk.cameras[i]
+      camera = chunk.cameras[i]
       print(camera)
       quality = float(camera.meta['Image/Quality'])
       print(str(quality))
       if quality < threshold:
         camera.enabled = False
-    #doc.save()
+        print("Quality below threshold, camera disabled.")
+    doc.save()
    
   mlabel = 'Photos with image quality less than ' + str(threshold) + ' disabled. Project saved.'
   #Metashape.app.messageBox(mlabel)     # display msgbox when done
@@ -106,48 +604,68 @@ def estimagequality():
   
 # -----------------------------------------------------------------------
 def align():
-  for chnk in Metashape.app.document.chunks:
-    chnk.detectMarkers()
-    chnk.matchPhotos(keypoint_limit = 40000, tiepoint_limit = 10000, generic_preselection = True, reference_preselection = True)
-    chnk.alignCameras()
-    #doc.save()
+  aligned_cameras = []
+  for chunk in doc.chunks:
+    chunk.detectMarkers()
+    chunk.matchPhotos(keypoint_limit = keypoint_limit, tiepoint_limit = tiepoint_limit, generic_preselection = generic_preselection_bool, reference_preselection = reference_preselection_bool)
+    chunk.alignCameras()
+    doc.save()
+    for camera in chunk.cameras:
+      if camera.transform!=None:
+        aligned_cameras.append(camera)
+  return len(aligned_cameras)
     
 # -----------------------------------------------------------------------
 
-def cpoptargets():
-    # defines path to target.txt file and the format of the file.  Makes a srting list of markers detected, then a range of markers up. Finally imports the target.txt file.
+def poptargets():
 
+  # If target data in database, get targets and make csv
+  if mode == "db":
+    query = (
+    "SELECT target_id, coord_x, coord_y, coord_z "
+    "FROM new.view_gcp_targets "
+    "WHERE status_uuid = '" + uuid + "';"
+    )
+    targets = dbconnection(query, "select_all")
+    with open(path + "/targets.csv", "w") as f:
+      csv_writer = csv.writer(f)
+      for target_tuple in targets:
+        csv_writer.writerow(target_tuple)
+    print("Targets saved to " + path + "/targets.csv")
 
-  #path = Metashape.app.getOpenFileName("Get the comma delimited target.txt file (name,x,y,z)")     # Path to the folder
-  folderpath = Metashape.app.getExistingDirectory("Select root folder for projects.")
-  format = Metashape.ReferenceFormatCSV #format of file is comma delimited
+  target_list = []
 
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
 
-    targetfile = folderpath + "/" + chnk.label + "/targets.txt"     # Path to the folder
-    #chunk = doc.chunk
+    targetfile = path + "/targets.csv"     # Path to the folder
 
-    chnk.crs = Metashape.CoordinateSystem("EPSG::32630")		#Change to get from DB
+    chunk.crs = Metashape.CoordinateSystem("EPSG::" + str(crs))	
 
-    MarkersList = str(list(chnk.markers))                            # strings a list of class markers.
-    print (MarkersList)                                              # display list of detected targets in console.
+    #MarkersList = str(list(chunk.markers))                           # strings a list of class markers.
+    #print (MarkersList)                                              # display list of detected targets in console.
 
     if found_major_version == '1.5':
-      chnk.loadReference(targetfile, csv, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
+      chunk.loadReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
     else:
-      chnk.importReference(targetfile, csv, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
-    chnk.updateTransform()
-    #doc.save()  
+      chunk.importReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
+    chunk.updateTransform()
+    doc.save()
+
+    #List enabled targets
+    for marker in chunk.markers:
+      if marker.reference.enabled:
+        target_list.append(marker)
+  return len(target_list)
 #--------------------------------------------------------------------------------
 
 #uncheckmarkers #unchecks markers in a chunk with two or fewer projections.
 def uncheckmarkers():
-
+  target_list = []
   #unchecks markers in a chunk with two or fewer projections.
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
 
-    for i in range(0, len(chnk.markers)):
-      marker = chnk.markers[i]
+    for i in range(0, len(chunk.markers)):
+      marker = chunk.markers[i]
       print(marker)
       noproj = len(marker.projections)
       print(str(noproj))
@@ -155,55 +673,84 @@ def uncheckmarkers():
         marker.reference.enabled = False
         print(str(marker) + " disabled.")
         
-    #doc.save()
-    print('All markers with fewer than 3 projections unchecked in chunk ' + chnk.label + '. Project saved.')
+    doc.save()
+    for marker in chunk.markers:
+      if marker.reference.enabled:
+        target_list.append(marker)
+
+    print('All markers with fewer than 3 projections unchecked in chunk ' + chunk.label + '. Project saved.')
+  return len(target_list)
+
+# -----------------------------------------------------------------------
+
+#calculate average total error in metres
+def calc_error():
+  error_list = []
+  for chunk in doc.chunks:
+    for marker in chunk.markers:
+    
+      source = chunk.crs.unproject(marker.reference.location) #measured values in geocentric coordinates
+      estim = chunk.transform.matrix.mulp(marker.position) #estimated coordinates in geocentric coordinates
+      local = chunk.crs.localframe(chunk.transform.matrix.mulp(marker.position)) #local LSE coordinates
+      error = local.mulv(estim - source)
+       
+      total = error.norm()      #error points
+      sum_squared = (total) ** 2    #Square root of error
+      error_list += [sum_squared]      #List with errors
+       
+  error_sum = sum(error_list)
+  n = len(error_list)
+  ErrorTotal = (error_sum / n) ** 0.5
+
+  return ErrorTotal
 
 # -----------------------------------------------------------------------
 #alignbb2cs Aligns bounding boxes of all chunks to the grid
 def alignbb2cs():
 
-  for chnk in doc.chunks:
-    T = chnk.transform.matrix
+  for chunk in doc.chunks:
+    T = chunk.transform.matrix
     v_t = T * Metashape.Vector( [0,0,0,1] )
     v_t.size = 3
-    if chnk.crs:
-      m = chnk.crs.localframe(v_t)
+    if chunk.crs:
+      m = chunk.crs.localframe(v_t)
     else:
       m = Metashape.Matrix().diag([1,1,1,1])
     m = m * T
     s = math.sqrt(m[0,0] ** 2 + m[0,1] ** 2 + m[0,2] ** 2) #scale factor
     R = Metashape.Matrix( [[m[0,0],m[0,1],m[0,2]], [m[1,0],m[1,1],m[1,2]], [m[2,0],m[2,1],m[2,2]]])
     R = R * (1. / s)
-    reg = chnk.region
+    reg = chunk.region
     reg.rot = R.t()
-    chnk.region = reg
-  print("All bounding boxes aligned to grid")
+    chunk.region = reg
+    doc.save()
+  print("All bounding boxes aligned to grid. Project saved.")
     
 #--------------------------------------------------------------------------------
 
 #Optimize alignemnts
 def optimizealignments():
 
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
     if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
-      chnk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
+      chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
     else:
-      chnk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
+      chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
         
-    #doc.save()
-    print('Camera positions optimised for chunk ' + chnk.label + '. Project saved.')
+    doc.save()
+    print('Camera positions optimised for chunk ' + chunk.label + '. Project saved.')
     
 #--------------------------------------------------------------------------------
 #Error reduction - Reconstruction Uncertainty
 def reconstructionuncertainty():
 
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
     if found_major_version == '1.5': 
       continue
     else:
-      points = chnk.point_cloud.points
+      points = chunk.point_cloud.points
       filter = Metashape.PointCloud.Filter()
-      filter.init(chnk, criterion = Metashape.PointCloud.Filter.ReconstructionUncertainty) #Reconstruction Uncertainty
+      filter.init(chunk, criterion = Metashape.PointCloud.Filter.ReconstructionUncertainty) #Reconstruction Uncertainty
       list_values = filter.values
       list_values_valid = list()
       StartPoints = len(list_values_valid)
@@ -221,26 +768,25 @@ def reconstructionuncertainty():
       filter.removePoints(threshold)
 
       print("")
-      print("Error Reduction Report for chunk" + chnk.label + ":")
+      print("Error Reduction Report for chunk " + chunk.label + ":")
       RU_actual_threshold = threshold
       print(str(threshold) + " threshold reached")
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
       print("Reconstruction Uncertainty filter completed")
-      print("")
     #doc.save()
 
 #--------------------------------------------------------------------------------
 #Error reduction - Projection Accuracy
 def projectionaccuracy():
 
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
     if found_major_version == '1.5': 
       continue
     else:
-      points = chnk.point_cloud.points
+      points = chunk.point_cloud.points
       filter = Metashape.PointCloud.Filter()
-      filter.init(chnk, criterion = Metashape.PointCloud.Filter.ProjectionAccuracy) #Projection Accuracy
+      filter.init(chunk, criterion = Metashape.PointCloud.Filter.ProjectionAccuracy) #Projection Accuracy
       list_values = filter.values
       list_values_valid = list()
 
@@ -257,26 +803,25 @@ def projectionaccuracy():
       filter.removePoints(threshold)
 
       print("")
-      print("Error Reduction Report for chunk" + chnk.label + ":")
+      print("Error Reduction Report for chunk " + chunk.label + ":")
       PA_actual_threshold = threshold
       print(str(threshold) + " threshold reached")
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
       print("Projection Accuracy filter completed")
-      print("")
     #doc.save()
     
 #--------------------------------------------------------------------------------
 #Error reduction - Reprojection Error
-def reconstructionuncertainty():
+def reproductionerror():
 
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
     if found_major_version == '1.5': 
       continue
     else:
-      points = chnk.point_cloud.points
+      points = chunk.point_cloud.points
       filter = Metashape.PointCloud.Filter()
-      filter.init(chnk, criterion = Metashape.PointCloud.Filter.ReprojectionError) #Reprojection Error
+      filter.init(chunk, criterion = Metashape.PointCloud.Filter.ReprojectionError) #Reprojection Error
       list_values = filter.values
       list_values_valid = list()
 
@@ -293,13 +838,12 @@ def reconstructionuncertainty():
       filter.removePoints(threshold)
 
       print("")
-      print("Error Reduction Report for chunk" + chnk.label + ":")
+      print("Error Reduction Report for chunk " + chunk.label + ":")
       RE_actual_threshold = threshold
       print(str(threshold) + " threshold reached")
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
       print("Reprojection Error filter completed")
-      print("")
     #doc.save()        
 #--------------------------------------------------------------------------------
 #Build Depth Maps
@@ -316,28 +860,313 @@ def reconstructionuncertainty():
 #	Lowest = 16
 #
 
-def builddepthmaps():
+def depthmaps():
+  quality_map = {
+    "Ultra": 1,
+    "High": 2,
+    "Medium": 4,
+    "Low": 8,
+    "Lowest": 16
+  }
+  filter_attr = depthmap_filter + "Filtering"
 
-  for chnk in doc.chunks:
+  for chunk in doc.chunks:
     if found_major_version == '1.5':
-      chnk.buildDepthMaps(quality= HighQuality, filter=ModerateFiltering, reuse_depth=True)
+      quality_attr = depthmap_quality + "Quality"
+      chunk.buildDepthMaps(
+        quality=quality_attr, 
+        filter=filter_attr, 
+        reuse_depth=True
+        )
     else:
-      chnk.buildDepthMaps(downscale=2, filter_mode=Metashape.ModerateFiltering, reuse_depth=True, max_neighbors=16, subdivide_task=True, workitem_size_cameras=20, max_workgroup_size=100)
+      quality_attr = quality_map[depthmap_quality]
+      chunk.buildDepthMaps(
+        downscale=quality_attr, 
+        filter_mode=getattr(Metashape, filter_attr), 
+        reuse_depth=True, max_neighbors=16, 
+        subdivide_task=True, 
+        workitem_size_cameras=20, 
+        max_workgroup_size=100
+        )
         
-    #doc.save()
-    print('Depth maps created for chunk ' + chnk.label + '. Project saved.')    
-           
-pickfoldernamechunk()
-estimagequality()
-align()
-cpoptargets()
-uncheckmarkers()
-alignbb2cs()
-optimizealignments()
-reconstructionuncertainty()
-optimizealignments()
-projectionaccuracy()
-optimizealignments()
-reconstructionuncertainty()
-optimizealignments()
-builddepthmaps()
+    doc.save()
+    print('Depthmaps created for chunk ' + chunk.label + '. Project saved.')    
+
+#--------------------------------------------------------------------------------
+#
+#Build Dense Cloud
+def densecloud():
+
+  for chunk in doc.chunks:
+    if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
+      chunk.buildDenseCloud()
+    else:
+      chunk.buildDenseCloud()  
+    doc.save()
+    print('Dense cloud built for chunk ' + chunk.label + '. Project saved.')
+
+
+#--------------------------------------------------------------------------------
+#
+#Build Mesh
+def mesh():
+
+  for chunk in doc.chunks:
+    if found_major_version == '1.5': 
+      chunk.buildModel(
+        surface_type = getattr(Metashape, surface_type),
+        interpolation = getattr(Metashape, interpolation),
+        face_count = face_count_custom,
+        source_data = getattr(Metashape, source_data),
+        vertex_colors = vertex_colors_bool
+        )
+    else:
+      chunk.buildModel(
+        surface_type = getattr(Metashape, surface_type),
+        interpolation = getattr(Metashape, interpolation),
+        face_count_custom = face_count_custom,
+        source_data = getattr(Metashape, source_data),
+        vertex_colors = vertex_colors_bool,
+        vertex_confidence = vertex_confidence_bool
+        )
+    doc.save()
+    print('Mesh built for chunk ' + chunk.label + '. Project saved.')
+
+
+#--------------------------------------------------------------------------------
+#
+#Build UV Maps and Texture
+def texture():
+
+  for chunk in doc.chunks:
+    if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
+      chunk.buildUV(page_count = uv_pages, texture_size = texture_size)
+      chunk.buildTexture(texture_size = texture_size, ghosting_filter = ghosting_filter_bool)
+    else:
+      chunk.buildUV(
+        mapping_mode = Metashape.GenericMapping,
+        page_count = uv_pages, 
+        texture_size = texture_size)
+      chunk.buildTexture(
+        blending_mode = getattr(Metashape, blending_mode),
+        texture_size = texture_size,
+        fill_holes = fill_holes_bool,
+        ghosting_filter = ghosting_filter_bool,
+        texture_type = getattr(Metashape.Model.TextureType, texture_type)
+        )
+    doc.save()
+    print('UV maps and texture created for chunk ' + chunk.label + '. Project saved.')
+
+#--------------------------------------------------------------------------------
+#
+#Build DEM
+def dem():
+
+  for chunk in doc.chunks:
+    if found_major_version == '1.5':
+      chunk.buildDem(
+        source = getattr(Metashape, dem_datasource), 
+        interpolation = getattr(Metashape, dem_interpolation)
+        )
+    else:
+      chunk.buildDem(
+        source_data = getattr(Metashape, dem_datasource), 
+        interpolation = getattr(Metashape, dem_interpolation),  
+        resolution = dem_resolution, 
+        subdivide_task = True
+        )
+
+
+    doc.save()
+    print('DEM created for chunk ' + chunk.label + '. Project saved.')
+
+#--------------------------------------------------------------------------------
+#
+#Build Orthomosaic
+def ortho():
+
+  for chunk in doc.chunks:
+    if found_major_version == '1.5':
+      chunk.buildOrthomosaic(
+        surface=getattr(Metashape, ortho_surfacedata), 
+        blending=getattr(Metashape, ortho_blending_mode), 
+        fill_holes=ortho_fill_holes_bool,
+        cull_faces=ortho_cull_faces_bool,
+        refine_seamlines=ortho_refine_seamlines_bool
+        )
+    else:
+      chunk.buildOrthomosaic(
+        surface_data = getattr(Metashape, ortho_surfacedata),
+        blending_mode = getattr(Metashape, ortho_blending_mode),
+        fill_holes = ortho_fill_holes_bool,
+        ghosting_filter = ortho_ghosting_filter_bool,
+        cull_faces = ortho_cull_faces_bool,
+        refine_seamlines = ortho_refine_seamlines_bool,
+        resolution = ortho_resolution
+        )
+
+    doc.save()
+    print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#  Run script #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+
+
+# Check mode, and create project
+if mode == "standalone":
+  print("Mode: Manual, standalone.")
+  pickfoldernamechunk()
+  uuid = ""
+elif mode == "db":
+  print("Mode: PostgreSQL database.")
+  uuid = loadfromdb()
+  processing_uuid = set_processing(uuid)
+
+# Get/set variables
+vars(uuid)
+
+# Estimate image quality
+if est_iq_bool:
+  if get_status(uuid, "estimating_iq") == "done":
+    print("Image quality estimation already done. Skipping.\n")
+  else:
+    update_status(uuid, "estimating_iq", "processing")
+    estimagequality(iq_threshold)
+    update_status(uuid, "estimating_iq", "done")
+
+# Align images  
+if align_bool:
+  if get_status(uuid, "aligning") == "done":
+    print("Image aligning already done. Skipping.\n")
+  else:
+    update_status(uuid, "aligning", "processing")
+    images_aligned = align()
+    update_processing(processing_uuid, "images_aligned", images_aligned)
+    update_status(uuid, "aligning", "done")
+
+
+# Populate targets
+if poptargets_bool:
+  if get_status(uuid, "populating_targets") == "done":
+    print("Target population already done. Skipping.\n")
+  else:
+    update_status(uuid, "populating_targets", "processing")
+    targets_used = poptargets()
+    update_processing(processing_uuid, "targets_used", targets_used)
+    error = calc_error()
+    update_processing(processing_uuid, "estimated_error", error)
+    update_status(uuid, "populating_targets", "done")
+
+# Uncheck markers with less than N projections
+if uncheckmarkers_bool:
+  if get_status(uuid, "uncheckingmarkers") == "done":
+    print("Target population already done. Skipping.\n")
+  else:
+    update_status(uuid, "uncheckingmarkers", "processing")
+    targets_used = uncheckmarkers()
+    update_processing(processing_uuid, "targets_used", targets_used)
+    error = calc_error()
+    update_processing(processing_uuid, "estimated_error", error)
+    update_status(uuid, "uncheckingmarkers", "done")
+
+# Align Bounding boxes to grid
+if alignbbox_bool:
+  if get_status(uuid, "aligning_bbox") == "done":
+    print("Bounding boxes already aligned to grid. Skipping.\n")
+  else:
+    update_status(uuid, "aligning_bbox", "processing")
+    alignbb2cs()
+    update_status(uuid, "aligning_bbox", "done")
+
+# Optimise alignment (first time)
+if optimizealignment_bool:
+  if get_status(uuid, "optimizing_alignment") == "done":
+    print("Alignment already optimised. Skipping.\n")
+  else:
+    update_status(uuid, "optimizing_alignment", "processing")
+    optimizealignments()
+    error = calc_error()
+    update_processing(processing_uuid, "estimated_error", error)
+    update_status(uuid, "optimizing_alignment", "done")
+
+# Reducing errors and re-optimising alignment
+if err_red_bool:
+  if get_status(uuid, "reducing_error") == "done":
+    print("Error reduction already done. Skipping.\n")
+  else:
+    update_status(uuid, "reducing_error", "processing")
+    reconstructionuncertainty()
+    optimizealignments()
+    projectionaccuracy()
+    optimizealignments()
+    reproductionerror()
+    optimizealignments()
+    error = calc_error()
+    update_processing(processing_uuid, "estimated_error", error)
+    update_status(uuid, "reducing_error", "done")
+
+# Build Depth Maps
+if depthmap_bool:
+  if get_status(uuid, "building_depthmaps") == "done":
+    print("Depthmaps already built. Skipping.\n")
+  else:
+    update_status(uuid, "building_depthmaps", "processing")
+    depthmaps()
+    update_processing(processing_uuid, "depth_maps_created", "true")
+    update_status(uuid, "building_depthmaps", "done")
+
+# Build Dense Cloud
+if densecloud_bool:
+  if get_status(uuid, "building_densecloud") == "done":
+    print("Dense cloud already built. Skipping.\n")
+  else:
+    update_status(uuid, "building_densecloud", "processing")
+    densecloud()
+    update_processing(processing_uuid, "dense_point_cloud_created", "true")
+    update_status(uuid, "building_densecloud", "done")
+
+# Build Mesh
+if mesh_bool:
+  if get_status(uuid, "meshing") == "done":
+    print("Mesh already built. Skipping.\n")
+  else:
+    update_status(uuid, "meshing", "processing")
+    mesh()
+    update_processing(processing_uuid, "mesh_created", "true")
+    update_status(uuid, "meshing", "done")
+
+# Build Texture
+if texture_bool:
+  if get_status(uuid, "texturing") == "done":
+    print("Mesh already built. Skipping.\n")
+  else:
+    update_status(uuid, "texturing", "processing")
+    texture()
+    update_processing(processing_uuid, "texture_created", "true")
+    update_status(uuid, "texturing", "done")
+
+# DEM
+if dem_bool:
+  if get_status(uuid, "building_dem") == "done":
+    print("DEM already made. Skipping.\n")
+  else:
+    update_status(uuid, "building_dem", "processing")
+    dem()
+    update_processing(processing_uuid, "dem_created", "true")
+    update_status(uuid, "building_dem", "done")
+
+# Orthophoto
+if ortho_bool:
+  if get_status(uuid, "building_ortho") == "done":
+    print("Orthomosaic already made. Skipping.\n")
+  else:
+    update_status(uuid, "building_ortho", "processing")
+    ortho()
+    update_processing(processing_uuid, "orthophoto_created", "true")
+    update_status(uuid, "building_ortho", "done")
+
+# Decimate mesh
+
+
+
+# Exports
