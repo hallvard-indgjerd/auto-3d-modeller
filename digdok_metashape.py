@@ -10,7 +10,8 @@
 import sys
 import os
 import glob
-from datetime import datetime
+import argparse
+from datetime import datetime, date
 import Metashape
 import psycopg2
 from dbconfig import config
@@ -25,7 +26,7 @@ found_major_version = ".".join(version.split('.')[:2])
 csvformat = Metashape.ReferenceFormatCSV #format of file is comma delimited
 
 #Modes: db, standalone
-mode = "db" 
+#mode = "db" 
 
 def vars(uuid):
   # Declaring vars as global:
@@ -90,6 +91,8 @@ def vars(uuid):
   global ortho_cull_faces_bool
   global ortho_refine_seamlines_bool
   global ortho_resolution
+  ## Export settings
+  global export_bool
 
 
   # If db mmode, get vars from DB
@@ -178,6 +181,9 @@ def vars(uuid):
     ortho_refine_seamlines_bool = settings[49]
     ortho_resolution = settings[50]
 
+    ## Export settings
+    export_bool = settings[51]
+
 
   # If standalone mode, set vars here 
   else:
@@ -250,6 +256,8 @@ def vars(uuid):
     ortho_refine_seamlines_bool = False
     ortho_resolution = 0
 
+    ## Export settings
+    export_bool = True
 
   ## Print out settings
   print()
@@ -359,13 +367,13 @@ def dbconnection(query, type):
 
 def update_status(uuid, step, status):
   if mode == "db":
-    print("Updating " + step + " status to '" + status + "'. \n")
     query = (
     "UPDATE new.process_status "
     "SET " + step + " = '" + status + "' "
     "WHERE uuid = '" + uuid + "';"
     )
     dbconnection(query, "update")
+    print("Updated " + step + " status to '" + status + "'. \n")
 
 #-----------------------------------------------------------------
 
@@ -427,11 +435,10 @@ def set_processing(uuid):
     "JOIN new.process_status ps ON ps.capture_uuid = cap.uuid "
     "WHERE ps.uuid = '" + uuid + "'::uuid"
     )
-    processing_uuid = dbconnection(query, "select_one")[0]
-    print("processing_uuid: " + str(processing_uuid))
-    print("software_uuid: " + software_uuid)
-
-    if not processing_uuid:
+    global processing_uuid
+    try:
+      processing_uuid = dbconnection(query, "select_one")[0]
+    except Exception as e:
       # If the processing entry doesn't exist (if it's not linked, we assume it doesn't exist..), create it:
       query = (
         "INSERT INTO new.processing (software, processed_on) "
@@ -439,7 +446,7 @@ def set_processing(uuid):
         "RETURNING uuid;"
         )
       # And link the newly created processing entry to the current capture entry via link-table.
-      processing_uuid = dbconnection(query, "insert")
+      processing_uuid = dbconnection(query, "insert")[0][0]
       query = (
         "INSERT INTO new.capture_processing_link (capture_uuid, processing_uuid) "
         "SELECT cap.uuid, '" + processing_uuid + "'::uuid "
@@ -456,9 +463,10 @@ def set_processing(uuid):
         "WHERE new.processing.uuid = '" + processing_uuid + "' ;"
         )
       dbconnection(query, "update")
-
-
-    return processing_uuid
+    print()
+    print("processing_uuid: " + str(processing_uuid))
+    print("software_uuid: " + software_uuid)
+    #return processing_uuid
 
 #-----------------------------------------------------------------
 
@@ -514,6 +522,7 @@ def loadfromdb():
   #Select folder
   global path
   path = capture[1]
+  global uuid
   uuid = capture[0]
   folder = os.path.basename(path)
   backslash = "/" # Metashape now uses slash (/) not backslash (\).
@@ -526,26 +535,37 @@ def loadfromdb():
   if get_status(uuid, "status") == "processing":
     if existing_projects:
       doc.open(existing_projects[0], read_only=False, ignore_lock=True)
-      return uuid
+      print("Project " + existing_projects[0] + " already exists. Opened existing project for editing.")
+      #return uuid
+      return
 
   # Set status
   update_status(uuid, "status", "processing")
 
-  subfolders = os.listdir(path)
-  for subfolder in subfolders:
-    if os.path.isdir(path):
+  #subfolders = os.listdir(path)
+  #for subfolder in subfolders:
+  if os.path.isdir(path):
+    # Checking if chunk already exists.
+    chunk_found = False
+    for i in range(len(doc.chunks)):
+      if str(doc.chunks[i].label) == str(folder):
+        print("Chunk " + folder + " already exists.")
+        doc.chunk = doc.chunks[i]
+        chunk_found = True
+        break
+    # If chunk doesn't exist, create it.
+    if not chunk_found:
       print ('Create new chunk named "' + folder + '"')
       #create new chunk named after folder
       chunk = doc.addChunk()
       chunk.label = folder
-
-      #load all images from specified folder into new chunk
-      image_list = os.listdir(path + "/Photos")
-      photo_list = list()
-      for photo in image_list:
-        if ("jpg" or "jpeg" or "JPG" or "JPEG") in photo.lower():
-          photo_list.append(path + "/Photos/" + photo)
-      chunk.addPhotos(photo_list)
+    #load all images from specified folder into new chunk
+    image_list = os.listdir(path + "/Photos")
+    photo_list = list()
+    for photo in image_list:
+      if ("jpg" or "jpeg" or "JPG" or "JPEG") in photo.lower():
+        photo_list.append(path + "/Photos/" + photo)
+    chunk.addPhotos(photo_list)
 
   #remove empty chunks
   for chunk in list(doc.chunks):
@@ -700,9 +720,11 @@ def calc_error():
        
   error_sum = sum(error_list)
   n = len(error_list)
-  ErrorTotal = (error_sum / n) ** 0.5
-
-  return ErrorTotal
+  if n > 0:
+    ErrorTotal = (error_sum / n) ** 0.5
+    return ErrorTotal
+  else:
+    return 0
 
 # -----------------------------------------------------------------------
 #alignbb2cs Aligns bounding boxes of all chunks to the grid
@@ -868,21 +890,21 @@ def depthmaps():
     "Low": 8,
     "Lowest": 16
   }
-  filter_attr = depthmap_filter + "Filtering"
+  #filter_attr = depthmap_filter + "Filtering"
 
   for chunk in doc.chunks:
     if found_major_version == '1.5':
       quality_attr = depthmap_quality + "Quality"
       chunk.buildDepthMaps(
         quality=quality_attr, 
-        filter=filter_attr, 
+        filter=depthmap_filter, 
         reuse_depth=True
         )
     else:
       quality_attr = quality_map[depthmap_quality]
       chunk.buildDepthMaps(
         downscale=quality_attr, 
-        filter_mode=getattr(Metashape, filter_attr), 
+        filter_mode=getattr(Metashape, depthmap_filter), 
         reuse_depth=True, max_neighbors=16, 
         subdivide_task=True, 
         workitem_size_cameras=20, 
@@ -936,7 +958,7 @@ def mesh():
 #--------------------------------------------------------------------------------
 #
 #Build UV Maps and Texture
-def texture():
+def texture(divider = 1):
 
   for chunk in doc.chunks:
     if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
@@ -946,10 +968,10 @@ def texture():
       chunk.buildUV(
         mapping_mode = Metashape.GenericMapping,
         page_count = uv_pages, 
-        texture_size = texture_size)
+        texture_size = texture_size / divider)
       chunk.buildTexture(
         blending_mode = getattr(Metashape, blending_mode),
-        texture_size = texture_size,
+        texture_size = texture_size / divider,
         fill_holes = fill_holes_bool,
         ghosting_filter = ghosting_filter_bool,
         texture_type = getattr(Metashape.Model.TextureType, texture_type)
@@ -1007,166 +1029,378 @@ def ortho():
 
     doc.save()
     print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')
+
+#--------------------------------------------------------------------------------
+#
+#Export data
+def export():
+  output_folder = path + '/exports/'
+  if not os.path.exists(output_folder):
+    os.mkdir(output_folder)
+
+  description_text = (
+    'The project contains objects NN from NN, \n captured by NN on the DD.MM.YYYY \n ' 
+    'using X equipment. The resulting exports are licensed  XY by KHM/NN.'
+    )
+  settings = [('Test 1', 'Value 1'), ('Test 2', 'Value 2')]
+
+  faceCount = 500000  #Number of faces for decimated mesh
+  shiftCoords =  Metashape.Vector( (470000, 4040000, 0) )
+  ply = Metashape.ModelFormatPLY
+  obj = Metashape.ModelFormatOBJ
+  laz = Metashape.PointsFormatLAZ
+  comment = "KHM " + str(date.today().year)
+
+  for chunk in doc.chunks:
+    crs = chunk.crs
+
+    if found_major_version == '1.5':
+      print("Version 1.5 export not yet set.")
+      if chunk.point_cloud:
+        filename_densepoint = output_folder + 'pointcloud_' + processing_uuid + '.las'
+        chunk.exportPointCloud(
+          filename_densepoint, 
+          source_data = Metashape.PointCloudData
+          )      
+    else:
+      filename_report = output_folder + 'report_' + processing_uuid + '.pdf'
+      chunk.exportReport(
+        path = filename_report,  
+        title = processing_uuid, 
+        description = description_text,
+        user_settings = settings
+        )
+      print("Report exported as " + filename_report)
+
+      if chunk.model:
+        filename_model = output_folder + 'model_' + processing_uuid + '.obj'
+        chunk.exportModel(
+          filename_model,
+          binary = False,  
+          clip_to_boundary=False, 
+          precision=6, 
+          save_texture=True, 
+          embed_texture=True, 
+          save_normals=True, 
+          save_colors=True, 
+          save_cameras=True, 
+          strip_extensions=False, 
+          format = obj, 
+          crs = crs, 
+          comment = comment, 
+          save_comment = True
+          )
+        print()
+        print("Model exported as " + filename_model)
+        duplicateMesh = Metashape.Tasks.DuplicateAsset()
+        duplicateMesh.asset_type = Metashape.ModelData
+        duplicateMesh.clip_to_boundary = False
+        duplicateMesh.asset_key = chunk.models[0].key
+        duplicateMesh.apply(chunk)
+        chunk.decimateModel(face_count=faceCount, apply_to_selection=False)
+        chunk.buildUV(mapping_mode=Metashape.GenericMapping, texture_size=4096)
+        chunk.buildTexture(blending_mode=Metashape.MosaicBlending, texture_size=4096, fill_holes=True, ghosting_filter=True)
+        filename_decimated_model = output_folder + 'model_shortcoords_' + processing_uuid + '.ply'
+        chunk.exportModel(
+          filename_decimated_model, 
+          binary=True, 
+          clip_to_boundary=False,  
+          save_texture=True, 
+          embed_texture=True, 
+          save_normals=True, 
+          save_colors=True, 
+          save_cameras=True, 
+          strip_extensions=False, 
+          format=ply, 
+          crs=crs, 
+          shift=shiftCoords
+          )
+        print()
+        print("Decimated model with shortened coordinates exported as " + filename_decimated_model)
+
+      if chunk.point_cloud:
+        filename_densepoint = output_folder + 'pointcloud_' + processing_uuid + '.las'
+        chunk.exportPoints(
+          filename_densepoint, 
+          source_data = Metashape.DenseCloudData,
+          save_normals=True,
+          save_colors=True,
+          save_confidence=True,
+          format= laz,
+          crs = crs,
+          comment = comment
+          )
+
+      if chunk.elevation:
+        filename_dem = output_folder + 'dem_' + processing_uuid + '.tif'
+        chunk.exportRaster(
+          filename_dem, 
+          source_data = Metashape.ElevationData
+          )
+
+      if chunk.orthomosaic:
+        filename_ortho = output_folder + 'ortho_' + processing_uuid + '.tif'
+        chunk.exportRaster(
+          filename_ortho, 
+          source_data = Metashape.OrthomosaicData
+          )
+
+    doc.save()
+    print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')    
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#  Run script #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 
+def run(runmode):
+  
+  global mode
+  mode = runmode
 
-# Check mode, and create project
-if mode == "standalone":
-  print("Mode: Manual, standalone.")
-  pickfoldernamechunk()
-  uuid = ""
-elif mode == "db":
-  print("Mode: PostgreSQL database.")
-  uuid = loadfromdb()
-  processing_uuid = set_processing(uuid)
+  # Check mode, and create project
+  if mode == "standalone":
+    print("Mode: Manual, standalone.")
+    pickfoldernamechunk()
+    global uuid
+    uuid = ""
+  elif mode == "db":
+    print("Mode: PostgreSQL database.")
+    loadfromdb()
+    set_processing(uuid)  
+  # Get/set variables
+  vars(uuid)
+  
+  # Estimate image quality
+  if est_iq_bool:
+    if get_status(uuid, "estimating_iq") == "done":
+      print("Image quality estimation already done. Skipping.\n")
+    else:
+      update_status(uuid, "estimating_iq", "processing")
+      try:
+        estimagequality(iq_threshold)
+      except Exception as e:
+        update_status(uuid, "estimating_iq", "failed")
+      else:
+        update_status(uuid, "estimating_iq", "done")
+  
+  # Align images  
+  if align_bool:
+    if get_status(uuid, "aligning") == "done":
+      print("Image aligning already done. Skipping.\n")
+    else:
+      update_status(uuid, "aligning", "processing")
+      try:
+        images_aligned = align()
+      except Exception as e:
+        update_status(uuid, "aligning", "failed")
+      else:
+        update_processing(processing_uuid, "images_aligned", images_aligned)
+        update_status(uuid, "aligning", "done")
+  
+  
+  # Populate targets
+  if poptargets_bool:
+    if get_status(uuid, "populating_targets") == "done":
+      print("Target population already done. Skipping.\n")
+    else:
+      update_status(uuid, "populating_targets", "processing")
+      try:
+        targets_used = poptargets()
+      except Exception as e:
+        update_status(uuid, "populating_targets", "failed")
+      else:
+        update_processing(processing_uuid, "targets_used", targets_used)
+        error = calc_error()
+        update_processing(processing_uuid, "estimated_error", error)
+        update_status(uuid, "populating_targets", "done")
+  
+  # Uncheck markers with less than N projections
+  if uncheckmarkers_bool:
+    if get_status(uuid, "uncheckingmarkers") == "done":
+      print("Target population already done. Skipping.\n")
+    else:
+      update_status(uuid, "uncheckingmarkers", "processing")
+      try:
+        targets_used = uncheckmarkers()
+      except Exception as e:
+        update_status(uuid, "uncheckingmarkers", "failed")
+      else:
+        update_processing(processing_uuid, "targets_used", targets_used)
+        error = calc_error()
+        update_processing(processing_uuid, "estimated_error", error)
+        update_status(uuid, "uncheckingmarkers", "done")
+  
+  # Align Bounding boxes to grid
+  if alignbbox_bool:
+    if get_status(uuid, "aligning_bbox") == "done":
+      print("Bounding boxes already aligned to grid. Skipping.\n")
+    else:
+      update_status(uuid, "aligning_bbox", "processing")
+      try:
+        alignbb2cs()
+      except Exception as e:
+        update_status(uuid, "aligning_bbox", "failed")
+      else:
+        update_status(uuid, "aligning_bbox", "done")
+  
+  # Optimise alignment (first time)
+  if optimizealignment_bool:
+    if get_status(uuid, "optimizing_alignment") == "done":
+      print("Alignment already optimised. Skipping.\n")
+    else:
+      update_status(uuid, "optimizing_alignment", "processing")
+      try:
+        optimizealignments()
+      except Exception as e:
+        update_status(uuid, "optimizing_alignment", "failed")
+        print(e)
+      else:
+        error = calc_error()
+        update_processing(processing_uuid, "estimated_error", error)
+        update_status(uuid, "optimizing_alignment", "done")
+      
+  # Reducing errors and re-optimising alignment
+  if err_red_bool:
+    if get_status(uuid, "reducing_error") == "done":
+      print("Error reduction already done. Skipping.\n")
+    else:
+      update_status(uuid, "reducing_error", "processing")
+      try:
+        reconstructionuncertainty()
+        optimizealignments()
+        projectionaccuracy()
+        optimizealignments()
+        reproductionerror()
+        optimizealignments()
+      except Exception as e:
+        update_status(uuid, "reducing_error", "failed")
+        print(e)
+      else:
+        error = calc_error()
+        update_processing(processing_uuid, "estimated_error", error)
+        update_status(uuid, "reducing_error", "done")
+  
+  # Build Depth Maps
+  if depthmap_bool:
+    if get_status(uuid, "building_depthmaps") == "done":
+      print("Depthmaps already built. Skipping.\n")
+    else:
+      update_status(uuid, "building_depthmaps", "processing")
+      try:
+        depthmaps()
+      except Exception as e:
+        update_status(uuid, "building_depthmaps", "failed")
+      else:
+        update_processing(processing_uuid, "depth_maps_created", "true")
+        update_status(uuid, "building_depthmaps", "done")
+  
+  # Build Dense Cloud
+  if densecloud_bool:
+    if get_status(uuid, "building_densecloud") == "done":
+      print("Dense cloud already built. Skipping.\n")
+    else:
+      update_status(uuid, "building_densecloud", "processing")
+      try:
+        densecloud()
+      except Exception as e:
+        update_status(uuid, "building_densecloud", "failed")
+      else:
+        update_processing(processing_uuid, "dense_point_cloud_created", "true")
+        update_status(uuid, "building_densecloud", "done")
+  
+  # Build Mesh
+  if mesh_bool:
+    if get_status(uuid, "meshing") == "done":
+      print("Mesh already built. Skipping.\n")
+    else:
+      update_status(uuid, "meshing", "processing")
+      try:
+        mesh()
+      except Exception as e:
+        update_status(uuid, "meshing", "failed")
+      else:
+        update_processing(processing_uuid, "mesh_created", "true")
+        update_status(uuid, "meshing", "done")
+  
+  # Build Texture
+  if texture_bool:
+    if get_status(uuid, "texturing") == "done":
+      print("Mesh already built. Skipping.\n")
+    else:
+      update_status(uuid, "texturing", "processing")
+      try:
+        texture()
+      except Exception as e:
+        update_status(uuid, "texturing", "failed")
+      else:
+        update_processing(processing_uuid, "texture_created", "true")
+        update_status(uuid, "texturing", "done")
+  
+  # DEM
+  if dem_bool:
+    if get_status(uuid, "building_dem") == "done":
+      print("DEM already made. Skipping.\n")
+    else:
+      update_status(uuid, "building_dem", "processing")
+      try:
+        dem()
+      except Exception as e:
+        update_status(uuid, "building_dem", "failed")
+      else:
+        update_processing(processing_uuid, "dem_created", "true")
+        update_status(uuid, "building_dem", "done")
+  
+  # Orthophoto
+  if ortho_bool:
+    if get_status(uuid, "building_ortho") == "done":
+      print("Orthomosaic already made. Skipping.\n")
+    else:
+      update_status(uuid, "building_ortho", "processing")
+      try:
+        ortho()
+      except Exception as e:
+        update_status(uuid, "building_ortho", "failed")
+      else:      
+        update_processing(processing_uuid, "orthophoto_created", "true")
+        update_status(uuid, "building_ortho", "done")      
+  
+  # Decimate mesh
+  
+  
+  
+  # Exports
+  if export_bool:
+    if get_status(uuid, "exporting") == "done":
+      print("Exports already done. Skipping.\n")
+    else:
+      update_status(uuid, "exporting", "processing")
+      try:
+        export()
+      except Exception as e:
+        print()
+        print("Exception:")
+        print(e)
+        print()
+        update_status(uuid, "exporting", "failed")
+      else:
+        update_status(uuid, "exporting", "done")
+      
+  
 
-# Get/set variables
-vars(uuid)
 
-# Estimate image quality
-if est_iq_bool:
-  if get_status(uuid, "estimating_iq") == "done":
-    print("Image quality estimation already done. Skipping.\n")
+
+# Run the script if this is main
+if __name__ == "__main__":
+  # Set command line arguments
+  argParser = argparse.ArgumentParser()
+  argParser.add_argument("-m", "--mode", nargs='?', const="db", type=str, default="db", help="Script mode, 'db' or 'standalone'.")
+  args = argParser.parse_args()
+  mode = args.mode
+  # Run
+  try:
+    run(mode)
+  except Exception as e:
+    # Set status failed
+    update_status(uuid, "status", "failed")
   else:
-    update_status(uuid, "estimating_iq", "processing")
-    estimagequality(iq_threshold)
-    update_status(uuid, "estimating_iq", "done")
-
-# Align images  
-if align_bool:
-  if get_status(uuid, "aligning") == "done":
-    print("Image aligning already done. Skipping.\n")
-  else:
-    update_status(uuid, "aligning", "processing")
-    images_aligned = align()
-    update_processing(processing_uuid, "images_aligned", images_aligned)
-    update_status(uuid, "aligning", "done")
-
-
-# Populate targets
-if poptargets_bool:
-  if get_status(uuid, "populating_targets") == "done":
-    print("Target population already done. Skipping.\n")
-  else:
-    update_status(uuid, "populating_targets", "processing")
-    targets_used = poptargets()
-    update_processing(processing_uuid, "targets_used", targets_used)
-    error = calc_error()
-    update_processing(processing_uuid, "estimated_error", error)
-    update_status(uuid, "populating_targets", "done")
-
-# Uncheck markers with less than N projections
-if uncheckmarkers_bool:
-  if get_status(uuid, "uncheckingmarkers") == "done":
-    print("Target population already done. Skipping.\n")
-  else:
-    update_status(uuid, "uncheckingmarkers", "processing")
-    targets_used = uncheckmarkers()
-    update_processing(processing_uuid, "targets_used", targets_used)
-    error = calc_error()
-    update_processing(processing_uuid, "estimated_error", error)
-    update_status(uuid, "uncheckingmarkers", "done")
-
-# Align Bounding boxes to grid
-if alignbbox_bool:
-  if get_status(uuid, "aligning_bbox") == "done":
-    print("Bounding boxes already aligned to grid. Skipping.\n")
-  else:
-    update_status(uuid, "aligning_bbox", "processing")
-    alignbb2cs()
-    update_status(uuid, "aligning_bbox", "done")
-
-# Optimise alignment (first time)
-if optimizealignment_bool:
-  if get_status(uuid, "optimizing_alignment") == "done":
-    print("Alignment already optimised. Skipping.\n")
-  else:
-    update_status(uuid, "optimizing_alignment", "processing")
-    optimizealignments()
-    error = calc_error()
-    update_processing(processing_uuid, "estimated_error", error)
-    update_status(uuid, "optimizing_alignment", "done")
-
-# Reducing errors and re-optimising alignment
-if err_red_bool:
-  if get_status(uuid, "reducing_error") == "done":
-    print("Error reduction already done. Skipping.\n")
-  else:
-    update_status(uuid, "reducing_error", "processing")
-    reconstructionuncertainty()
-    optimizealignments()
-    projectionaccuracy()
-    optimizealignments()
-    reproductionerror()
-    optimizealignments()
-    error = calc_error()
-    update_processing(processing_uuid, "estimated_error", error)
-    update_status(uuid, "reducing_error", "done")
-
-# Build Depth Maps
-if depthmap_bool:
-  if get_status(uuid, "building_depthmaps") == "done":
-    print("Depthmaps already built. Skipping.\n")
-  else:
-    update_status(uuid, "building_depthmaps", "processing")
-    depthmaps()
-    update_processing(processing_uuid, "depth_maps_created", "true")
-    update_status(uuid, "building_depthmaps", "done")
-
-# Build Dense Cloud
-if densecloud_bool:
-  if get_status(uuid, "building_densecloud") == "done":
-    print("Dense cloud already built. Skipping.\n")
-  else:
-    update_status(uuid, "building_densecloud", "processing")
-    densecloud()
-    update_processing(processing_uuid, "dense_point_cloud_created", "true")
-    update_status(uuid, "building_densecloud", "done")
-
-# Build Mesh
-if mesh_bool:
-  if get_status(uuid, "meshing") == "done":
-    print("Mesh already built. Skipping.\n")
-  else:
-    update_status(uuid, "meshing", "processing")
-    mesh()
-    update_processing(processing_uuid, "mesh_created", "true")
-    update_status(uuid, "meshing", "done")
-
-# Build Texture
-if texture_bool:
-  if get_status(uuid, "texturing") == "done":
-    print("Mesh already built. Skipping.\n")
-  else:
-    update_status(uuid, "texturing", "processing")
-    texture()
-    update_processing(processing_uuid, "texture_created", "true")
-    update_status(uuid, "texturing", "done")
-
-# DEM
-if dem_bool:
-  if get_status(uuid, "building_dem") == "done":
-    print("DEM already made. Skipping.\n")
-  else:
-    update_status(uuid, "building_dem", "processing")
-    dem()
-    update_processing(processing_uuid, "dem_created", "true")
-    update_status(uuid, "building_dem", "done")
-
-# Orthophoto
-if ortho_bool:
-  if get_status(uuid, "building_ortho") == "done":
-    print("Orthomosaic already made. Skipping.\n")
-  else:
-    update_status(uuid, "building_ortho", "processing")
-    ortho()
-    update_processing(processing_uuid, "orthophoto_created", "true")
-    update_status(uuid, "building_ortho", "done")
-
-# Decimate mesh
-
-
-
-# Exports
+    # Set status done
+    update_status(uuid, "status", "done")
