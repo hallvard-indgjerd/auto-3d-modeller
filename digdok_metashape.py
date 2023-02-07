@@ -13,10 +13,13 @@ import glob
 import argparse
 from datetime import datetime, date
 import Metashape
+import pymeshlab
 import psycopg2
 from dbconfig import config
 import math
 import csv
+import json
+import subprocess
 
 # Variables
 # doc = Metashape.app.document
@@ -36,6 +39,7 @@ def vars(uuid):
   global align_bool
   global poptargets_bool
   global uncheckmarkers_bool
+  global scalebar_bool
   global alignbbox_bool
   global optimizealignment_bool
   global err_red_bool
@@ -93,6 +97,8 @@ def vars(uuid):
   global ortho_resolution
   ## Export settings
   global export_bool
+  global short_coords
+  global export_formats
 
 
   # If db mmode, get vars from DB
@@ -115,6 +121,7 @@ def vars(uuid):
     align_bool = settings[3]
     poptargets_bool = settings[4]
     uncheckmarkers_bool = settings[5]
+    scalebar_bool = settings[52]
     alignbbox_bool = settings[6]
     optimizealignment_bool = settings[7]
     err_red_bool = settings[8]
@@ -183,6 +190,8 @@ def vars(uuid):
 
     ## Export settings
     export_bool = settings[51]
+    short_coords = settings[52]
+    export_formats = settings[53]
 
 
   # If standalone mode, set vars here 
@@ -194,6 +203,7 @@ def vars(uuid):
     align_bool = True
     poptargets_bool = True
     uncheckmarkers_bool = True
+    scalebar_bool = True
     alignbbox_bool = True
     optimizealignment_bool = True
     err_red_bool = True
@@ -258,6 +268,8 @@ def vars(uuid):
 
     ## Export settings
     export_bool = True
+    export_formats = '[{"type": "mesh", "format": "obj", "settings": {"faces": 0, "texture": True}},{"type": "mesh", "format": "ply", "settings": {"faces": 500000, "texture": True}},{"type": "dem", "format": "tiff", "settings": {"resolution": 0}}]'
+    short_coords = '[{"x": 0, "y": 0, "z": 0}]'
 
   ## Print out settings
   print()
@@ -276,6 +288,7 @@ def vars(uuid):
   print("CRS: EPSG::" + str(crs))
   print()  
   print("Uncheck markers: " + str(uncheckmarkers_bool))
+  print("Add scalebars: " + str(scalebar_bool))
   print("Align bounding box: " + str(alignbbox_bool))
   print("Optimize alignment: " + str(optimizealignment_bool))
   print("Error reduction: " + str(err_red_bool))
@@ -291,7 +304,14 @@ def vars(uuid):
   print("Depth map filter: " + depthmap_filter)
   print()  
   print("Build dense cloud: " + str(densecloud_bool))
+  print()
   print("Build mesh: " + str(mesh_bool))
+  print("Mesh surface type: " + str(surface_type))
+  print("Mesh interpolation: " + str(interpolation))
+  print("Mesh face count: " + str(face_count_custom))
+  print("Mesh source data: " + str(source_data))
+  print("Mesh vertex colours: " + str(vertex_colors_bool))
+  print("Mesh vertex confidence: " + str(vertex_confidence_bool))
   print()
   print("Build texture: " + str(texture_bool))
   print("UV page count: " + str(uv_pages))
@@ -519,11 +539,15 @@ def loadfromdb():
   if not capture:
     sys.exit("No models to process. Exiting.")
 
+  # Clear data from earlier runs
+  doc.clear()
+
   #Select folder
   global path
   path = capture[1]
   global uuid
   uuid = capture[0]
+  global folder
   folder = os.path.basename(path)
   backslash = "/" # Metashape now uses slash (/) not backslash (\).
   print (path) #display full path and folder name in console
@@ -532,10 +556,11 @@ def loadfromdb():
 
   # Check for existing project and open
   existing_projects = glob.glob(path + '/' + folder + '_*.psx')
-  if get_status(uuid, "status") == "processing":
+  if get_status(uuid, "status") not in ["done", "skip"]:
     if existing_projects:
       doc.open(existing_projects[0], read_only=False, ignore_lock=True)
       print("Project " + existing_projects[0] + " already exists. Opened existing project for editing.")
+      update_status(uuid, "status", "processing")
       #return uuid
       return
 
@@ -573,8 +598,12 @@ def loadfromdb():
       doc.remove(chunk)
   
   #save project
-  camera = chunk.cameras[0]
-  date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
+  camera = doc.chunks[0].cameras[0]
+  try:
+    date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
+  except Exception as e:
+    date = datetime.fromtimestamp(os.path.getmtime(photo_list[0]))
+    
   #area = Metashape.app.getString(label = "Area mapped (for filename):", value = "Room")
   project_name = folder + "_" + date.strftime("%d%m%y") + ".psx"
   doc.save(path + "/" + project_name)
@@ -591,8 +620,6 @@ def estimagequality(threshold):
   #tlabel = 'Quality theshold'
   #threshold = Metashape.app.getFloat(tlabel, value=0.6) # photos with image quality below this amount will be disabled.
   #threshold = iq_threshold
-  print("")
-  print("Estimating image quality.")
   for chunk in doc.chunks:
     #camera = chunk.cameras
     #chunk.estimateImageQuality(camera)
@@ -600,7 +627,7 @@ def estimagequality(threshold):
       if 'Image/Quality' not in camera.meta]
 
     if len(camerasniq) > 0:
-      print('Test OK!')
+      #print('Test OK!')
       #print(found_major_version)
       if found_major_version == '1.5':
         chunk.estimateImageQuality(camerasniq)
@@ -627,6 +654,7 @@ def align():
   aligned_cameras = []
   for chunk in doc.chunks:
     chunk.detectMarkers()
+    chunk.detectMarkers(inverted = True)
     chunk.matchPhotos(keypoint_limit = keypoint_limit, tiepoint_limit = tiepoint_limit, generic_preselection = generic_preselection_bool, reference_preselection = reference_preselection_bool)
     chunk.alignCameras()
     doc.save()
@@ -639,6 +667,8 @@ def align():
 
 def poptargets():
 
+  targetfile = path + "/targets.csv"     # Path to the folder and target file name to write and read.
+
   # If target data in database, get targets and make csv
   if mode == "db":
     query = (
@@ -647,35 +677,108 @@ def poptargets():
     "WHERE status_uuid = '" + uuid + "';"
     )
     targets = dbconnection(query, "select_all")
-    with open(path + "/targets.csv", "w") as f:
-      csv_writer = csv.writer(f)
-      for target_tuple in targets:
-        csv_writer.writerow(target_tuple)
-    print("Targets saved to " + path + "/targets.csv")
+    if len(targets)>0:
+      with open(targetfile, "w") as f:
+        csv_writer = csv.writer(f)
+        for target_tuple in targets:
+          csv_writer.writerow(target_tuple)
+      print("Targets saved to " + targetfile)
+    else:
+      print("No targets in database, will check for local target.csv file.")
 
   target_list = []
 
-  for chunk in doc.chunks:
-
-    targetfile = path + "/targets.csv"     # Path to the folder
-
-    chunk.crs = Metashape.CoordinateSystem("EPSG::" + str(crs))	
-
-    #MarkersList = str(list(chunk.markers))                           # strings a list of class markers.
-    #print (MarkersList)                                              # display list of detected targets in console.
-
-    if found_major_version == '1.5':
-      chunk.loadReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
-    else:
-      chunk.importReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
-    chunk.updateTransform()
-    doc.save()
-
-    #List enabled targets
-    for marker in chunk.markers:
-      if marker.reference.enabled:
-        target_list.append(marker)
+  if os.path.exists(targetfile):
+    for chunk in doc.chunks:
+  
+      chunk.crs = Metashape.CoordinateSystem("EPSG::" + str(crs))	
+  
+      #MarkersList = str(list(chunk.markers))                           # strings a list of class markers.
+      #print (MarkersList)                                              # display list of detected targets in console.
+  
+      if found_major_version == '1.5':
+        chunk.loadReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
+      else:
+        chunk.importReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
+      chunk.updateTransform()
+      doc.save()
+  
+      #List enabled targets
+      for marker in chunk.markers:
+        if marker.reference.enabled:
+          target_list.append(marker)
   return len(target_list)
+
+# -----------------------------------------------------------------------
+def get_marker(chunk, label):
+    for marker in chunk.markers:
+        if marker.label == label:
+             return marker
+    return None
+
+def add_scalebars():
+
+  scalebarfile = path + "/scalebars.csv"     # Path to the folder and target file name to write and read.
+
+  # If target data in database, get targets and make csv
+  if mode == "db":
+    query = (
+    "SELECT target_first, target_second, distance, precision "
+    "FROM new.view_scalebars "
+    "WHERE status_uuid = '" + uuid + "';"
+    )
+    scalebars = dbconnection(query, "select_all")
+    if len(scalebars)>0:
+      with open(scalebarfile, "w") as f:
+        csv_writer = csv.writer(f)
+        for scalebar_tuple in scalebars:
+          csv_writer.writerow(scalebar_tuple)
+      print("Scalebars saved to " + scalebarfile)
+    else:
+      print("No scalebars in database, will check for local scalbars.csv file.")
+
+  scalebar_list = []
+
+  if os.path.exists(scalebarfile):
+    for chunk in doc.chunks:
+      print("Loading scalebars from " + scalebarfile)
+      with open(scalebarfile, "r") as f:
+        scalebars = csv.reader(f)
+        scalebardict = dict()
+        for i, scalebar_row in enumerate(scalebars):
+          print("Row {}: {}".format(i, scalebar_row))
+          if found_major_version == '1.5':
+            first_marker = get_marker(chunk, scalebar_row[0])
+            second_marker = get_marker(chunk, scalebar_row[1])
+            print("First marker: {}".format(first_marker))
+            print("Second marker: {}".format(second_marker))
+            if first_marker and second_marker:
+              print("Test OK, creating scalebar.")
+              scalebardict['scalebar_%02d' % i] = chunk.addScalebar(first_marker, second_marker)
+              scalebardict['scalebar_%02d' % i] .reference.distance = float(scalebar_row[2])
+              scalebardict['scalebar_%02d' % i] .reference.accuracy = float(scalebar_row[3])
+              scalebardict['scalebar_%02d' % i] .label = scalebar_row[0] + " - " + scalebar_row[1]
+              print("Scalebar {} created.".format(scalebardict['scalebar_%02d' % i] .label))
+          else:
+            first_marker = get_marker(chunk, scalebar_row[0])
+            second_marker = get_marker(chunk, scalebar_row[1])
+            print("First marker: {}".format(first_marker))
+            print("Second marker: {}".format(second_marker))
+            if first_marker and second_marker:
+              print("Test OK, creating scalebar.")
+              scalebardict['scalebar_%02d' % i] = chunk.addScalebar(first_marker, second_marker)
+              scalebardict['scalebar_%02d' % i] .reference.distance = float(scalebar_row[2])
+              scalebardict['scalebar_%02d' % i] .reference.accuracy = float(scalebar_row[3])
+              scalebardict['scalebar_%02d' % i] .label = scalebar_row[0] + " - " + scalebar_row[1]
+              print("Scalebar {} created.".format(scalebardict['scalebar_%02d' % i] .label))
+      chunk.updateTransform()
+      doc.save()
+  
+      #List enabled targets
+      for scalebar in chunk.scalebars:
+        if scalebar.reference.enabled:
+          scalebar_list.append(scalebar)
+  return len(scalebar_list)  
 #--------------------------------------------------------------------------------
 
 #uncheckmarkers #unchecks markers in a chunk with two or fewer projections.
@@ -708,15 +811,18 @@ def calc_error():
   error_list = []
   for chunk in doc.chunks:
     for marker in chunk.markers:
-    
-      source = chunk.crs.unproject(marker.reference.location) #measured values in geocentric coordinates
-      estim = chunk.transform.matrix.mulp(marker.position) #estimated coordinates in geocentric coordinates
-      local = chunk.crs.localframe(chunk.transform.matrix.mulp(marker.position)) #local LSE coordinates
-      error = local.mulv(estim - source)
-       
-      total = error.norm()      #error points
-      sum_squared = (total) ** 2    #Square root of error
-      error_list += [sum_squared]      #List with errors
+      try:
+        source = chunk.crs.unproject(marker.reference.location) #measured values in geocentric coordinates
+        estim = chunk.transform.matrix.mulp(marker.position) #estimated coordinates in geocentric coordinates
+        local = chunk.crs.localframe(chunk.transform.matrix.mulp(marker.position)) #local LSE coordinates
+        error = local.mulv(estim - source)
+         
+        total = error.norm()      #error points
+        sum_squared = (total) ** 2    #Square root of error
+        error_list += [sum_squared]      #List with errors
+      except Exception as e:
+        return 0
+
        
   error_sum = sum(error_list)
   n = len(error_list)
@@ -918,12 +1024,19 @@ def depthmaps():
 #
 #Build Dense Cloud
 def densecloud():
-
   for chunk in doc.chunks:
-    if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
+    if found_major_version == '1.5': # Haven't checked older versions, both the same for now
       chunk.buildDenseCloud()
     else:
-      chunk.buildDenseCloud()  
+      chunk.buildDenseCloud(
+        point_colors=True, 
+        point_confidence=False, 
+        keep_depth=True, 
+        max_neighbors=100,
+        subdivide_task=True, 
+        workitem_size_cameras=20, 
+        max_workgroup_size=100
+        )  
     doc.save()
     print('Dense cloud built for chunk ' + chunk.label + '. Project saved.')
 
@@ -1045,7 +1158,22 @@ def export():
   settings = [('Test 1', 'Value 1'), ('Test 2', 'Value 2')]
 
   faceCount = 500000  #Number of faces for decimated mesh
-  shiftCoords =  Metashape.Vector( (470000, 4040000, 0) )
+
+  # Check and set shorhtened coordinates
+  short_coord_file = path + "/short_coords.csv"     # Path to the folder and target file name to write and read.
+  short_coord_dict = json.loads(short_coords)
+
+  # Write short coords to csv in project folder
+  with open(short_coord_file, "w") as f:
+    csv_writer = csv.DictWriter(f, short_coord_dict.keys())
+    csv_writer.writeheader()
+    csv_writer.writerow(short_coord_dict)
+  print("Shorthened coordinate data saved to " + short_coord_file)
+
+  # Apply to ply export (with decimated mesh?) for use by meshlab and 3dhop
+  shiftCoords =  Metashape.Vector( (short_coord_dict['x'], hort_coord_dict['y'], hort_coord_dict['z']) )
+
+  # Def formats
   ply = Metashape.ModelFormatPLY
   obj = Metashape.ModelFormatOBJ
   laz = Metashape.PointsFormatLAZ
@@ -1066,9 +1194,9 @@ def export():
       filename_report = output_folder + 'report_' + processing_uuid + '.pdf'
       chunk.exportReport(
         path = filename_report,  
-        title = processing_uuid, 
-        description = description_text,
-        user_settings = settings
+        title = folder, 
+        description = processing_uuid
+        #user_settings = settings
         )
       print("Report exported as " + filename_report)
 
@@ -1100,7 +1228,8 @@ def export():
         chunk.decimateModel(face_count=faceCount, apply_to_selection=False)
         chunk.buildUV(mapping_mode=Metashape.GenericMapping, texture_size=4096)
         chunk.buildTexture(blending_mode=Metashape.MosaicBlending, texture_size=4096, fill_holes=True, ghosting_filter=True)
-        filename_decimated_model = output_folder + 'model_shortcoords_' + processing_uuid + '.ply'
+        decimated_model = output_folder + 'model_shortcoords_' + processing_uuid
+        filename_decimated_model = decimated_model + '.ply'
         chunk.exportModel(
           filename_decimated_model, 
           binary=True, 
@@ -1146,7 +1275,36 @@ def export():
           )
 
     doc.save()
-    print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')    
+    print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')
+
+  # Create Nexus files
+
+  # Prepare mesh in MeshLab
+  extless_filename_model = os.path.splitext(filename_model)[0]
+  ms = pymeshlab.MeshSet()
+  ms.load_new_mesh(filename_model)
+  ms.save_current_mesh(
+    extless_filename_model + ".ply", 
+    binary=True, 
+    save_vertex_normal=False, 
+    save_face_color=False,
+    save_wedge_texcoord=True
+    )
+
+  os.environ['PATH'] += ':'+'/home/hallvard/Apps/nexus/nexus/bin'
+  try:
+    build_nxs = "nxsbuild " + extless_filename_model + ".ply -o " + extless_filename_model + ".nxs"
+    subprocess.run(build_nxs, shell=True)
+  except Exception as e:
+    build_nxs = "nxsbuild -G" + extless_filename_model + ".ply -o " + extless_filename_model + ".nxs"
+    subprocess.run(build_nxs, shell=True)
+  finally:
+    build_nxz = "nxsedit -z " + extless_filename_model + ".nxs -o " + extless_filename_model + ".nxz"
+    subprocess.run(build_nxz, shell=True)
+  
+  
+
+
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#  Run script #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
@@ -1171,26 +1329,40 @@ def run(runmode):
   
   # Estimate image quality
   if est_iq_bool:
-    if get_status(uuid, "estimating_iq") == "done":
+    print("")
+    print("***** Estimating Image Quality *****")
+    print("")
+    if get_status(uuid, "estimating_iq") in ["done", "skip"]:
       print("Image quality estimation already done. Skipping.\n")
     else:
       update_status(uuid, "estimating_iq", "processing")
       try:
         estimagequality(iq_threshold)
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "estimating_iq", "failed")
       else:
         update_status(uuid, "estimating_iq", "done")
   
   # Align images  
   if align_bool:
-    if get_status(uuid, "aligning") == "done":
+    print("")
+    print("***** Aligning Images *****")
+    print("")
+    if get_status(uuid, "aligning") in ["done", "skip"]:
       print("Image aligning already done. Skipping.\n")
     else:
       update_status(uuid, "aligning", "processing")
       try:
         images_aligned = align()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "aligning", "failed")
       else:
         update_processing(processing_uuid, "images_aligned", images_aligned)
@@ -1199,60 +1371,110 @@ def run(runmode):
   
   # Populate targets
   if poptargets_bool:
-    if get_status(uuid, "populating_targets") == "done":
+    print("")
+    print("***** Georeferencing Targets *****")
+    print("")    
+    if get_status(uuid, "populating_targets") in ["done", "skip"]:
       print("Target population already done. Skipping.\n")
     else:
       update_status(uuid, "populating_targets", "processing")
       try:
         targets_used = poptargets()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "populating_targets", "failed")
       else:
         update_processing(processing_uuid, "targets_used", targets_used)
         error = calc_error()
         update_processing(processing_uuid, "estimated_error", error)
         update_status(uuid, "populating_targets", "done")
-  
+
   # Uncheck markers with less than N projections
   if uncheckmarkers_bool:
-    if get_status(uuid, "uncheckingmarkers") == "done":
+    print("")
+    print("***** Unchecking Markers *****")
+    print("")    
+    if get_status(uuid, "uncheckingmarkers") in ["done", "skip"]:
       print("Target population already done. Skipping.\n")
     else:
       update_status(uuid, "uncheckingmarkers", "processing")
       try:
         targets_used = uncheckmarkers()
+        error = calc_error()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "uncheckingmarkers", "failed")
       else:
+        print(str(targets_used) + " targets used.") 
         update_processing(processing_uuid, "targets_used", targets_used)
-        error = calc_error()
         update_processing(processing_uuid, "estimated_error", error)
         update_status(uuid, "uncheckingmarkers", "done")
+
+  # Populate Scalebars
+  if scalebar_bool:
+    print("")
+    print("***** Adding Scalebars *****")
+    print("")    
+    if get_status(uuid, "adding_scalebars") in ["done", "skip"]:
+      print("Scalebars alrady added. Skipping.\n")
+    else:
+      update_status(uuid, "adding_scalebars", "processing")
+      try:
+        scalebars_used = add_scalebars()
+      except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
+        update_status(uuid, "adding_scalebars", "failed")
+      else:
+        print(str(scalebars_used) + " scalebars used.")
+        update_processing(processing_uuid, "scalebars_used", scalebars_used)
+        update_status(uuid, "adding_scalebars", "done")        
   
   # Align Bounding boxes to grid
   if alignbbox_bool:
-    if get_status(uuid, "aligning_bbox") == "done":
+    print("")
+    print("***** Aligning Bounding Box *****")
+    print("")    
+    if get_status(uuid, "aligning_bbox") in ["done", "skip"]:
       print("Bounding boxes already aligned to grid. Skipping.\n")
     else:
       update_status(uuid, "aligning_bbox", "processing")
       try:
         alignbb2cs()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "aligning_bbox", "failed")
       else:
         update_status(uuid, "aligning_bbox", "done")
   
   # Optimise alignment (first time)
   if optimizealignment_bool:
-    if get_status(uuid, "optimizing_alignment") == "done":
+    print("")
+    print("***** Optimising Alignment *****")
+    print("")    
+    if get_status(uuid, "optimizing_alignment") in ["done", "skip"]:
       print("Alignment already optimised. Skipping.\n")
     else:
       update_status(uuid, "optimizing_alignment", "processing")
       try:
         optimizealignments()
       except Exception as e:
-        update_status(uuid, "optimizing_alignment", "failed")
+        print()
+        print("!!!!! Exception !!!!!")
         print(e)
+        print()
+        update_status(uuid, "optimizing_alignment", "failed")
       else:
         error = calc_error()
         update_processing(processing_uuid, "estimated_error", error)
@@ -1260,7 +1482,10 @@ def run(runmode):
       
   # Reducing errors and re-optimising alignment
   if err_red_bool:
-    if get_status(uuid, "reducing_error") == "done":
+    print("")
+    print("***** Running Error Reduction Algorithms *****")
+    print("")    
+    if get_status(uuid, "reducing_error") in ["done", "skip"]:
       print("Error reduction already done. Skipping.\n")
     else:
       update_status(uuid, "reducing_error", "processing")
@@ -1272,8 +1497,11 @@ def run(runmode):
         reproductionerror()
         optimizealignments()
       except Exception as e:
-        update_status(uuid, "reducing_error", "failed")
+        print()
+        print("!!!!! Exception !!!!!")
         print(e)
+        print()
+        update_status(uuid, "reducing_error", "failed")
       else:
         error = calc_error()
         update_processing(processing_uuid, "estimated_error", error)
@@ -1281,13 +1509,20 @@ def run(runmode):
   
   # Build Depth Maps
   if depthmap_bool:
-    if get_status(uuid, "building_depthmaps") == "done":
+    print("")
+    print("***** Building Depthmaps *****")
+    print("")    
+    if get_status(uuid, "building_depthmaps") in ["done", "skip"]:
       print("Depthmaps already built. Skipping.\n")
     else:
       update_status(uuid, "building_depthmaps", "processing")
       try:
         depthmaps()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "building_depthmaps", "failed")
       else:
         update_processing(processing_uuid, "depth_maps_created", "true")
@@ -1295,13 +1530,20 @@ def run(runmode):
   
   # Build Dense Cloud
   if densecloud_bool:
-    if get_status(uuid, "building_densecloud") == "done":
+    print("")
+    print("***** Building Dense Cloud *****")
+    print("")    
+    if get_status(uuid, "building_densecloud") in ["done", "skip"]:
       print("Dense cloud already built. Skipping.\n")
     else:
       update_status(uuid, "building_densecloud", "processing")
       try:
         densecloud()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "building_densecloud", "failed")
       else:
         update_processing(processing_uuid, "dense_point_cloud_created", "true")
@@ -1309,13 +1551,20 @@ def run(runmode):
   
   # Build Mesh
   if mesh_bool:
-    if get_status(uuid, "meshing") == "done":
+    print("")
+    print("***** Creating Mesh *****")
+    print("")    
+    if get_status(uuid, "meshing") in ["done", "skip"]:
       print("Mesh already built. Skipping.\n")
     else:
       update_status(uuid, "meshing", "processing")
       try:
         mesh()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "meshing", "failed")
       else:
         update_processing(processing_uuid, "mesh_created", "true")
@@ -1323,13 +1572,20 @@ def run(runmode):
   
   # Build Texture
   if texture_bool:
-    if get_status(uuid, "texturing") == "done":
+    print("")
+    print("***** Creating Texture *****")
+    print("")    
+    if get_status(uuid, "texturing") in ["done", "skip"]:
       print("Mesh already built. Skipping.\n")
     else:
       update_status(uuid, "texturing", "processing")
       try:
         texture()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "texturing", "failed")
       else:
         update_processing(processing_uuid, "texture_created", "true")
@@ -1337,13 +1593,20 @@ def run(runmode):
   
   # DEM
   if dem_bool:
-    if get_status(uuid, "building_dem") == "done":
+    print("")
+    print("***** Building DEM *****")
+    print("")    
+    if get_status(uuid, "building_dem") in ["done", "skip"]:
       print("DEM already made. Skipping.\n")
     else:
       update_status(uuid, "building_dem", "processing")
       try:
         dem()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "building_dem", "failed")
       else:
         update_processing(processing_uuid, "dem_created", "true")
@@ -1351,13 +1614,20 @@ def run(runmode):
   
   # Orthophoto
   if ortho_bool:
-    if get_status(uuid, "building_ortho") == "done":
+    print("")
+    print("***** Building Orthomosaic *****")
+    print("")    
+    if get_status(uuid, "building_ortho") in ["done", "skip"]:
       print("Orthomosaic already made. Skipping.\n")
     else:
       update_status(uuid, "building_ortho", "processing")
       try:
         ortho()
       except Exception as e:
+        print()
+        print("!!!!! Exception !!!!!")
+        print(e)
+        print()
         update_status(uuid, "building_ortho", "failed")
       else:      
         update_processing(processing_uuid, "orthophoto_created", "true")
@@ -1369,7 +1639,10 @@ def run(runmode):
   
   # Exports
   if export_bool:
-    if get_status(uuid, "exporting") == "done":
+    print("")
+    print("***** Exporting results *****")
+    print("")    
+    if get_status(uuid, "exporting") in ["done", "skip"]:
       print("Exports already done. Skipping.\n")
     else:
       update_status(uuid, "exporting", "processing")
@@ -1377,14 +1650,14 @@ def run(runmode):
         export()
       except Exception as e:
         print()
-        print("Exception:")
+        print("!!!!! Exception !!!!!")
         print(e)
         print()
         update_status(uuid, "exporting", "failed")
       else:
         update_status(uuid, "exporting", "done")
       
-  
+  return uuid
 
 
 
@@ -1400,6 +1673,10 @@ if __name__ == "__main__":
     run(mode)
   except Exception as e:
     # Set status failed
+    print()
+    print("!!!!! Exception !!!!!")
+    print(e)
+    print()
     update_status(uuid, "status", "failed")
   else:
     # Set status done

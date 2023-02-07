@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-
+import Metashape
 import digdok_metashape as dd
 
 mode = "db"
@@ -14,11 +14,22 @@ def get_project_queue():
 if __name__ == "__main__":
   count = get_project_queue()
   while count > 0:
-  	print("Loading project.")
-  	print()
-  	dd.run(mode)
-  	count = get_project_queue()
+    print("Loading project.")
+    print()
+    try:
+      uuid = dd.run(mode)
+    except Exception as e:
+      # Set status failed
+      print()
+      print("!!!!! Exception !!!!!")
+      print(e)
+      print()
+      dd.update_status(uuid, "status", "failed")
+    else:
+      # Set status done
+      dd.update_status(uuid, "status", "done")
+    count = get_project_queue()
   else:
-  	print("Project queue is empty. Exiting.")
+    print("Project queue is empty. Exiting.")
 
 
