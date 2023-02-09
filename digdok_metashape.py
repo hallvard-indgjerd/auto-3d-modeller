@@ -87,6 +87,7 @@ def vars(uuid):
   global dem_datasource
   global dem_interpolation
   global dem_resolution
+  global dem_params
   ## Orthos settings
   global ortho_surfacedata
   global ortho_blending_mode
@@ -178,6 +179,7 @@ def vars(uuid):
     dem_datasource = settings[41]
     dem_interpolation = settings[42]
     dem_resolution = settings[43]
+    dem_params = settings[55]
 
     ## Orthos settings
     ortho_surfacedata = settings[44]
@@ -190,8 +192,8 @@ def vars(uuid):
 
     ## Export settings
     export_bool = settings[51]
-    short_coords = settings[52]
-    export_formats = settings[53]
+    short_coords = settings[53]
+    export_formats = settings[54]
 
 
   # If standalone mode, set vars here 
@@ -1104,6 +1106,8 @@ def dem():
         interpolation = getattr(Metashape, dem_interpolation)
         )
     else:
+      # print(str(dem_params))
+      # chunk.buildDem(**dem_params)
       chunk.buildDem(
         source_data = getattr(Metashape, dem_datasource), 
         interpolation = getattr(Metashape, dem_interpolation),  
@@ -1160,18 +1164,22 @@ def export():
   faceCount = 500000  #Number of faces for decimated mesh
 
   # Check and set shorhtened coordinates
-  short_coord_file = path + "/short_coords.csv"     # Path to the folder and target file name to write and read.
-  short_coord_dict = json.loads(short_coords)
+  if short_coords:
+    print("Shortcoords: " + str(short_coords))
+    short_coord_file = path + "/short_coords.csv"     # Path to the folder and target file name to write and read.
+    #short_coord_dict = json.loads(short_coords)
 
   # Write short coords to csv in project folder
-  with open(short_coord_file, "w") as f:
-    csv_writer = csv.DictWriter(f, short_coord_dict.keys())
-    csv_writer.writeheader()
-    csv_writer.writerow(short_coord_dict)
-  print("Shorthened coordinate data saved to " + short_coord_file)
+    with open(short_coord_file, "w") as f:
+      csv_writer = csv.DictWriter(f, short_coords.keys())
+      csv_writer.writeheader()
+      csv_writer.writerow(short_coords)
+    print("Shorthened coordinate data saved to " + short_coord_file)
 
   # Apply to ply export (with decimated mesh?) for use by meshlab and 3dhop
-  shiftCoords =  Metashape.Vector( (short_coord_dict['x'], hort_coord_dict['y'], hort_coord_dict['z']) )
+    shiftCoords =  Metashape.Vector( (short_coords['x'], short_coords['y'], short_coords['z']) )
+  else:
+    shiftCoords =  Metashape.Vector( 0, 0, 0)
 
   # Def formats
   ply = Metashape.ModelFormatPLY
