@@ -102,7 +102,7 @@ def vars(uuid):
   global export_formats
 
 
-  # If db mmode, get vars from DB
+  # If db mode, get vars from DB
   if mode == "db":
     query = (
       "SELECT settings.*"
@@ -229,7 +229,7 @@ def vars(uuid):
     PA_Threshold = 5
     RE_Threshold = 0.9
   
-    ##CRS
+    ## CRS
     crs = 32630
   
     ## Image alignment settings
@@ -254,7 +254,7 @@ def vars(uuid):
     vertex_colors_bool = True
     vertex_confidence_bool = True
 
-    ##DEM settings
+    ## DEM settings
     dem_datasource = "DenseCloudData"
     dem_interpolation = "EnabledInterpolation"
     dem_resolution = 0
@@ -273,7 +273,7 @@ def vars(uuid):
     export_formats = '[{"type": "mesh", "format": "obj", "settings": {"faces": 0, "texture": True}},{"type": "mesh", "format": "ply", "settings": {"faces": 500000, "texture": True}},{"type": "dem", "format": "tiff", "settings": {"resolution": 0}}]'
     short_coords = '[{"x": 0, "y": 0, "z": 0}]'
 
-  ## Print out settings
+  ## Print settings
   print()
   print("Setting group: " + setting_group)
   print()
@@ -495,11 +495,11 @@ def set_processing(uuid):
 def pickfoldernamechunk():
   # Create a new chunk named from a selected a folder and add all photos from that folder
 
-  #Select folder
+  ## Select folder
   global path
   path = Metashape.app.getExistingDirectory("Select root folder for projects.")
   backslash = "/" # Metashape now uses slash (/) not backslash (\).
-  print (path) #display full path and folder name in console
+  print (path) # display full path and folder name in console
   bkslno = path.rfind(backslash)+1
   pathlen = len(path)
   folders = os.listdir(path)
@@ -507,11 +507,11 @@ def pickfoldernamechunk():
     folderpath = os.path.join(path,folder)
     if os.path.isdir(folderpath):
       print ('Create new chunk named "' + folder + '"')
-      #create new chunk named after folder
+      # create new chunk named after folder
       chunk = doc.addChunk()
       chunk.label = folder
 
-      #load all images from specified folder into new chunk
+      # load all images from specified folder into new chunk
       image_list = os.listdir(folderpath + "/Photos")
       photo_list = list()
       for photo in image_list:
@@ -519,12 +519,12 @@ def pickfoldernamechunk():
           photo_list.append(folderpath + "/Photos/" + photo)
       chunk.addPhotos(photo_list)
 
-  #remove empty chunks
+  ## Remove empty chunks
   for chunk in list(doc.chunks):
     if not len(chunk.cameras):
       doc.remove(chunk)
   
-  #save project
+  ## Save project
   camera = chunk.cameras[0]
   date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
   #area = Metashape.app.getString(label = "Area mapped (for filename):", value = "Room")
@@ -544,7 +544,7 @@ def loadfromdb():
   # Clear data from earlier runs
   doc.clear()
 
-  #Select folder
+  # Select folder
   global path
   path = capture[1]
   global uuid
