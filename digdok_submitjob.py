@@ -1,0 +1,2 @@
+# findme suggestion: add a script that lets you add a job (of any kind) to the processing queue. 
+# This is back in the realms of reinventing the metashape job handler but could reduce friction for working with more complex workflows?
