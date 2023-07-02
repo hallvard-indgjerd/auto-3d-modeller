@@ -32,7 +32,7 @@ class watchDlg(QtWidgets.QDialog):
 
         self.setWindowTitle("Watch mode")
 
-        self.btnStartReset = QtWidgets.QPushButton("Start/Reset")
+        self.btnStartReset = QtWidgets.QPushButton("Start/Reset (here be monsters)")
         self.btnStartReset.setFixedSize(90, 50)
         self.btnStartReset.setToolTip("Detects markers and performs alignment on entire dataset")
 
@@ -109,9 +109,23 @@ class watchDlg(QtWidgets.QDialog):
             # continue to next processing stage
 
             print (str(len(photo_list)) + "new photos added")
+            return True
 
         else:
             print ('no photos to add.')
+            return False
+        
+
+    def reprocess():
+        print("something for the future")
+        #   findme todo:
+        #   swap out the jpgs for dngs and reprocess on high
+        #   include some managment for merging chunks first (?)
+
+        #   findme todo later:
+        #   adapt to process low file sizes and swap in with large to reduce process time?
+        #       e.g.export camera positions
+        #       add photos new and import positions (do sizes need changing?)
 
 
     # adds new photos and adds them to the alignment
@@ -121,6 +135,9 @@ class watchDlg(QtWidgets.QDialog):
         global isReset
 
         print("isProcessing = " + str(isProcessing))
+        print("isReset = " + str(isReset))
+        print("isFirst = " + str(isFirst))
+
 
         isProcessing = True
         
@@ -128,40 +145,58 @@ class watchDlg(QtWidgets.QDialog):
             # see https://www.agisoft.com/forum/index.php?topic=10112.0
             # detectMarkers(target_type=CircularTarget12bit, tolerance=25, filter_mask=False, inverted=False, noparity=False, maximum_residual=5, minimum_size=0, minimum_dist=5, cameras=photo_list)
         
-        self.load_photos()        
+        p = self.load_photos()        
 
         if isFirst:
+            print ("first run")
+
+            # findme todo: allow for reduction of markers to avoid clusters and redetect more after final final alignment (?)
+            chunk.detectMarkers(target_type=Metashape.CircularTarget12bit, tolerance=10, filter_mask=False, inverted=False, noparity=False, maximum_residual=5, minimum_size=0, minimum_dist=5)
+
             # align all images from scratch
             isFirst = False
             for frame in chunk.frames:
                 # see https://www.agisoft.com/forum/index.php?topic=11697.0
-                frame.matchPhotos(downscale=4, reset_matches=True, generic_preselection=True, keep_keypoints=True, reference_preselection=False, mask_tiepoints=False)
-                chunk.alignCameras(reset_alignment=True)
-        elif isReset:
-            # reset alignment and realign using some of the existing information
+                frame.matchPhotos(downscale=4, generic_preselection=True, keep_keypoints=True, reference_preselection=False, mask_tiepoints=False)
+            
+            chunk.alignCameras(reset_alignment=True)
 
-            # findme todo:  add a merge markers step to have only one detect markers on photo-import
+        elif isReset:
+            print ("resetting alignment and markers")
+            # reset alignment and realign using some of the existing information
+            # findme debug next: something fishy with the behaviour sometimes breaks or left unfinished
+
+            # findme todo: add a merge markers step to have only one detect markers on photo-import
             # findme todo: expose or preset the tolerance. set low due to DoF issues with 
             
             isReset = False
             chunk.remove(chunk.markers)
             chunk.point_cloud.removeKeypoints()
+            Metashape.app.update()
 
+            # findme todo: allow for reduction of markers to avoid clusters and redetect more after final final alignment (?)
+            chunk.detectMarkers(target_type=Metashape.CircularTarget12bit, tolerance=20, filter_mask=False, inverted=False, noparity=False, maximum_residual=5, minimum_size=0, minimum_dist=5)
+
+            Metashape.app.update()
             for frame in chunk.frames:
-                frame.matchPhotos(downscale=4, reset_matches=True, keep_keypoints=True, generic_preselection=False, reference_preselection=True, reference_preselection_mode=Metashape.ReferencePreselectionEstimated, mask_tiepoints=True)
+                frame.matchPhotos(downscale=4, reset_matches=True, keep_keypoints=True, generic_preselection=False, reference_preselection=True, reference_preselection_mode=Metashape.ReferencePreselectionEstimated, mask_tiepoints=False)
                 # findme todo: add some nuances for dealing with different masks and failed alignments at later stages of processing?
+                Metashape.app.update()
 
-                chunk.detectMarkers(target_type=Metashape.CircularTarget12bit, tolerance=15, filter_mask=False, inverted=False, noparity=False, maximum_residual=5, minimum_size=0, minimum_dist=5)
-                chunk.alignCameras(reset_alignment=True)
+            chunk.alignCameras(reset_alignment=True)
+
 
         elif isWatching:
-            # add new images to existing alignment
-            for frame in chunk.frames:
-                frame.matchPhotos(downscale=4, reset_matches=False, keep_keypoints=True, generic_preselection=True, reference_preselection=True, reference_preselection_mode=Metashape.ReferencePreselectionSource, mask_tiepoints=True)
+            print ("adding images if they exist")
+            if p:
+                # add new images to existing alignment
+                for frame in chunk.frames:
+                    frame.matchPhotos(downscale=4, reset_matches=False, keep_keypoints=True, generic_preselection=True, reference_preselection=True, reference_preselection_mode=Metashape.ReferencePreselectionSource, mask_tiepoints=True)
+                
                 chunk.alignCameras(reset_alignment=False)
 
         isProcessing = False
-
+        print ("Stopped processing... waiting and watching")
 
     # async loop handler. Will run in the background checking if there is anything to process every
     def monitor(self):
@@ -193,6 +228,7 @@ class watchDlg(QtWidgets.QDialog):
         else:
             print("end of watch process deleting the monitor")
             del m
+            # findme todo next: something might be getting stuck in a loop and the thread isn't being deleted.
             
 
 #------------------  button actions -----------
@@ -287,7 +323,6 @@ def watch_capture():
     # set global variables
     chunk = doc.chunk
     isWatching = False      # always start without the watch enabled, even if processing stages were left running
-    isReset = False         # flag that rejiggers whole alignment from the beginning
     isNewFocus = False      # flag so the next bactch of photos added are placed in a new calibration 
     isOn = True
 
@@ -301,12 +336,14 @@ def watch_capture():
     else:
         print("the thread is dead, long live the thread")
         isProcessing = False
-    
+    isReset = False
     isFirst = True
     # checks for existing alignment to choose appropriate alignment settings
     for camera in chunk.cameras:
         if camera.transform:
             isFirst=False
+            isReset = True         # flag that rejiggers whole alignment from the beginning
+
     
 
     # Get the folder to watch 
