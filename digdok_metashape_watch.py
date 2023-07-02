@@ -32,7 +32,7 @@ class watchDlg(QtWidgets.QDialog):
 
         self.setWindowTitle("Watch mode")
 
-        self.btnStartReset = QtWidgets.QPushButton("Start/Reset (here be monsters)")
+        self.btnStartReset = QtWidgets.QPushButton("Start/Reset")
         self.btnStartReset.setFixedSize(90, 50)
         self.btnStartReset.setToolTip("Detects markers and performs alignment on entire dataset")
 
@@ -275,24 +275,28 @@ class watchDlg(QtWidgets.QDialog):
     # begins the processing from the beginning
     def start_reset(self):
         global isWatching
+        global isReset
 
 
-        # initializes the monitor function
+        # initializes the monitor function if not already running
         if not 'm' in globals():
             self.startMonitor()
+        else:
+            print ("process still running")
 
-        # only does stuff when nothings already working
-        if not isWatching:
-            isWatching = True
-            self.setWindowTitle("Watch mode: running...")
-            # starts a new watch function on a new thread
+        # only does stuff when nothings already in process
+        # findme todo: handle better with button enable etc.
+        if not isProcessing:
+            if not isWatching:
+                isWatching = True
+                self.setWindowTitle("Watch mode: running...")
+                # starts a new watch function on a new thread
 
-            # flag a reset command
+            # switch flag for reset command
             if not isFirst:
-                print("isReset ")
+                print("isReset " + str(isReset))
                 isReset = True
-            else:
-                print("isFirst ")
+
 
 
 
