@@ -197,7 +197,7 @@ def vars(uuid):
     export_formats = settings[54]
 
   
-  elif mode="file":
+  elif mode == "file":
     # findme todo: read from instruction file
     # json or xml to use batch file setups? 
 
@@ -676,6 +676,7 @@ def estimagequality(threshold):
 # -----------------------------------------------------------------------
 
 # findme todo: create iterative alignment process (low align, high align) (probably best to do in main call, and pass vars direct instead of global vars?)
+# findme todo: add in remove unnecessary cameras (after any re-alignment) script to thin out too-close baseline (note caution with objects especially for texturing)
 def align():
   aligned_cameras = []
   for chunk in doc.chunks:
