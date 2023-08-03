@@ -25,7 +25,7 @@ import subprocess
 # doc = Metashape.app.document
 doc = Metashape.Document()
 version = Metashape.app.version
-found_major_version = ".".join(version.split('.')[:2])
+found_major_version = float(".".join(version.split('.')[:2]))
 csvformat = Metashape.ReferenceFormatCSV #format of file is comma delimited
 
 #Modes: db, standalone
@@ -631,10 +631,12 @@ def estimagequality(threshold):
     if len(camerasniq) > 0:
       #print('Test OK!')
       #print(found_major_version)
-      if found_major_version == '1.5':
+      if found_major_version <= 1.5:
         chunk.estimateImageQuality(camerasniq)
-      else:
+      elif found_major_version < 2:
         chunk.analyzePhotos(camerasniq)
+      else:
+        chunk.analyzeImages(camerasniq)
 
     for i in range(0, len(chunk.cameras)):
       print('photo ' + str(i))
@@ -698,7 +700,7 @@ def poptargets():
       #MarkersList = str(list(chunk.markers))                           # strings a list of class markers.
       #print (MarkersList)                                              # display list of detected targets in console.
   
-      if found_major_version == '1.5':
+      if found_major_version <= 1.5:
         chunk.loadReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
       else:
         chunk.importReference(targetfile, csvformat, columns='nxyz', delimiter=',', skip_rows=0) #import coord values.
@@ -749,7 +751,7 @@ def add_scalebars():
         scalebardict = dict()
         for i, scalebar_row in enumerate(scalebars):
           print("Row {}: {}".format(i, scalebar_row))
-          if found_major_version == '1.5':
+          if found_major_version <= 1.5:
             first_marker = get_marker(chunk, scalebar_row[0])
             second_marker = get_marker(chunk, scalebar_row[1])
             print("First marker: {}".format(first_marker))
@@ -862,7 +864,7 @@ def alignbb2cs():
 def optimizealignments():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
+    if found_major_version <= 1.5: # Haven't cheked older versions, both the same for now
       chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
     else:
       chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
@@ -875,9 +877,9 @@ def optimizealignments():
 def reconstructionuncertainty():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5': 
+    if found_major_version <= 1.5: 
       continue
-    else:
+    elif found_major_version < 2:
       points = chunk.point_cloud.points
       filter = Metashape.PointCloud.Filter()
       filter.init(chunk, criterion = Metashape.PointCloud.Filter.ReconstructionUncertainty) #Reconstruction Uncertainty
@@ -904,6 +906,33 @@ def reconstructionuncertainty():
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
       print("Reconstruction Uncertainty filter completed")
+    else:
+      points = chunk.tie_points.points
+      filter = Metashape.TiePoints.Filter()
+      filter.init(chunk, criterion = Metashape.TiePoints.Filter.ReconstructionUncertainty) #Reconstruction Uncertainty
+      list_values = filter.values
+      list_values_valid = list()
+      StartPoints = len(list_values_valid)
+
+      for i in range(len(list_values)):
+        if points[i].valid:
+          list_values_valid.append(list_values[i])
+      list_values_valid.sort()
+      target = int(len(list_values_valid) * RU_Percent / 100)
+      StartPoints = int(len(list_values_valid))
+      threshold = list_values_valid[target]
+      if (threshold < RU_Threshold):
+        threshold = RU_Threshold
+      filter.selectPoints(threshold)
+      filter.removePoints(threshold)
+
+      print("")
+      print("Error Reduction Report for chunk " + chunk.label + ":")
+      RU_actual_threshold = threshold
+      print(str(threshold) + " threshold reached")
+      print(str(StartPoints) + " points at start")
+      print(str(target) + " points removed")
+      print("Reconstruction Uncertainty filter completed")      
     #doc.save()
 
 #--------------------------------------------------------------------------------
@@ -911,9 +940,9 @@ def reconstructionuncertainty():
 def projectionaccuracy():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5': 
+    if found_major_version <= 1.5: 
       continue
-    else:
+    elif found_major_version < 2:
       points = chunk.point_cloud.points
       filter = Metashape.PointCloud.Filter()
       filter.init(chunk, criterion = Metashape.PointCloud.Filter.ProjectionAccuracy) #Projection Accuracy
@@ -939,6 +968,32 @@ def projectionaccuracy():
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
       print("Projection Accuracy filter completed")
+    else:
+      points = chunk.tie_points.points
+      filter = Metashape.TiePoints.Filter()
+      filter.init(chunk, criterion = Metashape.TiePoints.Filter.ProjectionAccuracy) #Projection Accuracy
+      list_values = filter.values
+      list_values_valid = list()
+
+      for i in range(len(list_values)):
+        if points[i].valid:
+          list_values_valid.append(list_values[i])
+      list_values_valid.sort()
+      target = int(len(list_values_valid) * PA_Percent / 100)
+      StartPoints = int(len(list_values_valid))
+      threshold = list_values_valid[target]
+      if (threshold < PA_Threshold):
+        threshold = PA_Threshold
+      filter.selectPoints(threshold)
+      filter.removePoints(threshold)
+
+      print("")
+      print("Error Reduction Report for chunk " + chunk.label + ":")
+      PA_actual_threshold = threshold
+      print(str(threshold) + " threshold reached")
+      print(str(StartPoints) + " points at start")
+      print(str(target) + " points removed")
+      print("Projection Accuracy filter completed")      
     #doc.save()
     
 #--------------------------------------------------------------------------------
@@ -946,9 +1001,9 @@ def projectionaccuracy():
 def reproductionerror():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5': 
+    if found_major_version <= 1.5: 
       continue
-    else:
+    elif found_major_version < 2:
       points = chunk.point_cloud.points
       filter = Metashape.PointCloud.Filter()
       filter.init(chunk, criterion = Metashape.PointCloud.Filter.ReprojectionError) #Reprojection Error
@@ -974,6 +1029,32 @@ def reproductionerror():
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
       print("Reprojection Error filter completed")
+    else:
+      points = chunk.tie_points.points
+      filter = Metashape.TiePoints.Filter()
+      filter.init(chunk, criterion = Metashape.TiePoints.Filter.ReprojectionError) #Reprojection Error
+      list_values = filter.values
+      list_values_valid = list()
+
+      for i in range(len(list_values)):
+        if points[i].valid:
+          list_values_valid.append(list_values[i])
+      list_values_valid.sort()
+      target = int(len(list_values_valid) * RE_Percent / 100)
+      StartPoints = int(len(list_values_valid))
+      threshold = list_values_valid[target]
+      if (threshold < RE_Threshold):
+        threshold = RE_Threshold
+      filter.selectPoints(threshold)
+      filter.removePoints(threshold)
+
+      print("")
+      print("Error Reduction Report for chunk " + chunk.label + ":")
+      RE_actual_threshold = threshold
+      print(str(threshold) + " threshold reached")
+      print(str(StartPoints) + " points at start")
+      print(str(target) + " points removed")
+      print("Reprojection Error filter completed")      
     #doc.save()        
 #--------------------------------------------------------------------------------
 #Build Depth Maps
@@ -1001,7 +1082,7 @@ def depthmaps():
   #filter_attr = depthmap_filter + "Filtering"
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5':
+    if found_major_version <= 1.5:
       quality_attr = depthmap_quality + "Quality"
       chunk.buildDepthMaps(
         quality=quality_attr, 
@@ -1027,9 +1108,9 @@ def depthmaps():
 #Build Dense Cloud
 def densecloud():
   for chunk in doc.chunks:
-    if found_major_version == '1.5': # Haven't checked older versions, both the same for now
+    if found_major_version <= 1.5: # Haven't checked older versions, both the same for now
       chunk.buildDenseCloud()
-    else:
+    elif found_major_version < 2:
       chunk.buildDenseCloud(
         point_colors=True, 
         point_confidence=False, 
@@ -1038,7 +1119,17 @@ def densecloud():
         subdivide_task=True, 
         workitem_size_cameras=20, 
         max_workgroup_size=100
-        )  
+        )
+    else:
+      chunk.buildPointCloud(
+        point_colors=True, 
+        point_confidence=False, 
+        keep_depth=True, 
+        max_neighbors=100,
+        subdivide_task=True, 
+        workitem_size_cameras=20, 
+        max_workgroup_size=100
+        )
     doc.save()
     print('Dense cloud built for chunk ' + chunk.label + '. Project saved.')
 
@@ -1049,7 +1140,7 @@ def densecloud():
 def mesh():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5': 
+    if found_major_version <= 1.5: 
       chunk.buildModel(
         surface_type = getattr(Metashape, surface_type),
         interpolation = getattr(Metashape, interpolation),
@@ -1076,7 +1167,7 @@ def mesh():
 def texture(divider = 1):
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5': # Haven't cheked older versions, both the same for now
+    if found_major_version <= 1.5: # Haven't cheked older versions, both the same for now
       chunk.buildUV(page_count = uv_pages, texture_size = texture_size)
       chunk.buildTexture(texture_size = texture_size, ghosting_filter = ghosting_filter_bool)
     else:
@@ -1100,7 +1191,7 @@ def texture(divider = 1):
 def dem():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5':
+    if found_major_version <= 1.5:
       chunk.buildDem(
         source = getattr(Metashape, dem_datasource), 
         interpolation = getattr(Metashape, dem_interpolation)
@@ -1125,7 +1216,7 @@ def dem():
 def ortho():
 
   for chunk in doc.chunks:
-    if found_major_version == '1.5':
+    if found_major_version <= 1.5:
       chunk.buildOrthomosaic(
         surface=getattr(Metashape, ortho_surfacedata), 
         blending=getattr(Metashape, ortho_blending_mode), 
@@ -1184,21 +1275,21 @@ def export():
   # Def formats
   ply = Metashape.ModelFormatPLY
   obj = Metashape.ModelFormatOBJ
-  laz = Metashape.PointsFormatLAZ
+  laz = Metashape.PointsFormatLAZ # Check if this isn't PointCloudFormatLAZ in >2.0.0
   comment = "KHM " + str(date.today().year)
 
   for chunk in doc.chunks:
     crs = chunk.crs
 
-    if found_major_version == '1.5':
-      print("Version 1.5 export not yet set.")
+    if found_major_version <= 1.5:
+      print("Version 1.5 or earlier export not yet set.")
       if chunk.point_cloud:
         filename_densepoint = output_folder + 'pointcloud_' + processing_uuid + '.las'
         chunk.exportPointCloud(
           filename_densepoint, 
           source_data = Metashape.PointCloudData
           )      
-    else:
+    elif found_major_version < 2:
       filename_report = output_folder + 'report_' + processing_uuid + '.pdf'
       chunk.exportReport(
         path = filename_report,  
@@ -1263,7 +1354,7 @@ def export():
           save_normals=True,
           save_colors=True,
           save_confidence=True,
-          format= laz,
+          format= Metashape.PointsFormatLAZ,
           crs = crs,
           comment = comment
           )
@@ -1281,7 +1372,89 @@ def export():
           filename_ortho, 
           source_data = Metashape.OrthomosaicData
           )
+    else:
+      filename_report = output_folder + 'report_' + processing_uuid + '.pdf'
+      chunk.exportReport(
+        path = filename_report,  
+        title = folder, 
+        description = processing_uuid
+        #user_settings = settings
+        )
+      print("Report exported as " + filename_report)
 
+      if chunk.model:
+        filename_model = output_folder + 'model_' + processing_uuid + '.obj'
+        chunk.exportModel(
+          filename_model,
+          binary = False,  
+          clip_to_boundary=False, 
+          precision=6, 
+          save_texture=True, 
+          embed_texture=True, 
+          save_normals=True, 
+          save_colors=True, 
+          save_cameras=True, 
+          strip_extensions=False, 
+          format = obj, 
+          crs = crs, 
+          comment = comment, 
+          save_comment = True
+          )
+        print()
+        print("Model exported as " + filename_model)
+        duplicateMesh = Metashape.Tasks.DuplicateAsset()
+        duplicateMesh.asset_type = Metashape.ModelData
+        duplicateMesh.clip_to_boundary = False
+        duplicateMesh.asset_key = chunk.models[0].key
+        duplicateMesh.apply(chunk)
+        chunk.decimateModel(face_count=faceCount, apply_to_selection=False)
+        chunk.buildUV(mapping_mode=Metashape.GenericMapping, texture_size=4096)
+        chunk.buildTexture(blending_mode=Metashape.MosaicBlending, texture_size=4096, fill_holes=True, ghosting_filter=True)
+        decimated_model = output_folder + 'model_shortcoords_' + processing_uuid
+        filename_decimated_model = decimated_model + '.ply'
+        chunk.exportModel(
+          filename_decimated_model, 
+          binary=True, 
+          clip_to_boundary=False,  
+          save_texture=True, 
+          embed_texture=True, 
+          save_normals=True, 
+          save_colors=True, 
+          save_cameras=True, 
+          strip_extensions=False, 
+          format=ply, 
+          crs=crs, 
+          shift=shiftCoords
+          )
+        print()
+        print("Decimated model with shortened coordinates exported as " + filename_decimated_model)
+
+      if chunk.point_cloud:
+        filename_densepoint = output_folder + 'pointcloud_' + processing_uuid + '.las'
+        chunk.ExportPointCloud(
+          filename_densepoint, 
+          source_data = Metashape.PointCloudData,
+          save_normals=True,
+          save_colors=True,
+          save_confidence=True,
+          format= Metashape.PointCloudFormatLAZ,
+          crs = crs,
+          comment = comment
+          )
+
+      if chunk.elevation:
+        filename_dem = output_folder + 'dem_' + processing_uuid + '.tif'
+        chunk.exportRaster(
+          filename_dem, 
+          source_data = Metashape.ElevationData
+          )
+
+      if chunk.orthomosaic:
+        filename_ortho = output_folder + 'ortho_' + processing_uuid + '.tif'
+        chunk.exportRaster(
+          filename_ortho, 
+          source_data = Metashape.OrthomosaicData
+          )
     doc.save()
     print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')
 
