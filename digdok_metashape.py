@@ -1,10 +1,10 @@
-#!/usr/bin/python
+# !/usr/bin/python
 #
 # Fully automated photogrammetry workflow using Agisoft Metashape's python librares
 #
 # Written by Hallvard R. Indgjerd, 18.12.2022
-# 
-# Based on code from James Herbst, 2016, and Hallvard Indgjerd 2021/2022 
+#
+# Based on code from James Herbst, 2016, and Hallvard Indgjerd 2021/2022
 # Input on optimisation values from the Universitetssenteret paa Svalbard's Geo-SfM course: https://unisvalbard.github.io/Geo-SfM/content/lessons/l1/tutorial.html and the USGS SfM Workflow documentation: https://pubs.usgs.gov/of/2021/1039/ofr20211039.pdf
 
 import sys
@@ -12,14 +12,15 @@ import os
 import glob
 import argparse
 from datetime import datetime, date
-import Metashape
-import pymeshlab
-import psycopg2
-from dbconfig import config
 import math
 import csv
 import json
 import subprocess
+import Metashape
+import pymeshlab
+import psycopg2
+from dbconfig import config
+
 
 # Variables
 # doc = Metashape.app.document
@@ -28,8 +29,8 @@ version = Metashape.app.version
 found_major_version = float(".".join(version.split('.')[:2]))
 csvformat = Metashape.ReferenceFormatCSV #format of file is comma delimited
 
-#Modes: db, standalone
-#mode = "db" 
+# Modes: db, standalone
+# mode = "db"
 
 def vars(uuid):
   # Declaring vars as global:
@@ -109,14 +110,14 @@ def vars(uuid):
       "FROM new.process_settings settings "
       "JOIN new.process_status proc ON proc.settings_uuid = settings.uuid "
       "WHERE proc.uuid = '" + uuid + "';"
-      )
+    )
     settings = dbconnection(query, "select_one")
-  
+
     print("Settings retrieved: ")
     print(settings)
-  
+
     setting_group = settings[1]
-  
+
     ## Workflow
     est_iq_bool = settings[2]
     align_bool = settings[3]
@@ -132,27 +133,27 @@ def vars(uuid):
     texture_bool = settings[12]
     dem_bool = settings[13]
     ortho_bool = settings[14]
-  
+
     ## Image quality
     iq_threshold = settings[15]
-  
+
     ## Error correction Percentages
     RU_Percent = settings[16]
     PA_Percent = settings[17]
     RE_Percent = settings[18]
-  
+
     ## Error correction Thresholds
     RU_Threshold = settings[19]
     PA_Threshold = settings[20]
     RE_Threshold = settings[21]
-  
+
     ## Depthmaps settings
     depthmap_quality = settings[22]
     depthmap_filter = settings[23]
   
     ## CRS
     crs = settings[24]
-  
+
     ## Image alignment settings
     keypoint_limit = settings[25]
     tiepoint_limit = settings[26]
@@ -288,7 +289,7 @@ def vars(uuid):
   print()
   print("Populate targets: " + str(poptargets_bool))
   print("CRS: EPSG::" + str(crs))
-  print()  
+  print()
   print("Uncheck markers: " + str(uncheckmarkers_bool))
   print("Add scalebars: " + str(scalebar_bool))
   print("Align bounding box: " + str(alignbbox_bool))
@@ -299,12 +300,12 @@ def vars(uuid):
   print("PA percent: " + str(PA_Percent))
   print("PA threshold: " + str(PA_Threshold))
   print("RE percent: " + str(RE_Percent))
-  print("RE threshold: " + str(RE_Threshold))  
+  print("RE threshold: " + str(RE_Threshold))
   print()
   print("Build depthmaps: " + str(depthmap_bool))
   print("Depth map quality: " + depthmap_quality)
   print("Depth map filter: " + depthmap_filter)
-  print()  
+  print()
   print("Build dense cloud: " + str(densecloud_bool))
   print()
   print("Build mesh: " + str(mesh_bool))
@@ -346,9 +347,9 @@ def dbconnection(query, type):
       params = config()
       # connect to the PostgreSQL server
       print('Connecting to the PostgreSQL database...')
-      connection = psycopg2.connect(**params)        
+      connection = psycopg2.connect(**params)
       # create a cursor
-      cursor = connection.cursor()        
+      cursor = connection.cursor()
       # Execute query
       cursor.execute(query)
       if type == "insert":
@@ -385,49 +386,49 @@ def dbconnection(query, type):
       cursor.close()
       connection.close()
 
-#-----------------------------------------------------------------
+# -----------------------------------------------------------------
 
 def update_status(uuid, step, status):
   if mode == "db":
     query = (
-    "UPDATE new.process_status "
-    "SET " + step + " = '" + status + "' "
-    "WHERE uuid = '" + uuid + "';"
+      "UPDATE new.process_status "
+      "SET " + step + " = '" + status + "' "
+      "WHERE uuid = '" + uuid + "';"
     )
     dbconnection(query, "update")
     print("Updated " + step + " status to '" + status + "'. \n")
 
-#-----------------------------------------------------------------
+# -----------------------------------------------------------------
 
 def update_processing(uuid, step, value):
   if mode == "db":
     query = (
-    "UPDATE new.processing "
-    "SET " + step + " = " + str(value) + " "
-    "WHERE uuid = '" + uuid + "';"
+      "UPDATE new.processing "
+      "SET " + step + " = " + str(value) + " "
+      "WHERE uuid = '" + uuid + "';"
     )
     dbconnection(query, "update")
-#-----------------------------------------------------------------
+# -----------------------------------------------------------------
 
 def get_status(uuid, step):
   if mode == "db":
     query = (
-    "SELECT " + step + " "
-    "FROM new.process_status "
-    "WHERE uuid = '" + uuid + "';"
+      "SELECT " + step + " "
+      "FROM new.process_status "
+      "WHERE uuid = '" + uuid + "';"
     )
     status = dbconnection(query, "select_one")
     return status[0]
 
-#-----------------------------------------------------------------
+# -----------------------------------------------------------------
 
 def set_software():
   if mode == "db":
 
     query = (
-    "SELECT uuid "
-    "FROM new.software "
-    "WHERE software_name = 'Metashape' and software_version = '" + version + "';"
+      "SELECT uuid "
+      "FROM new.software "
+      "WHERE software_name = 'Metashape' and software_version = '" + version + "';"
     )
     software_uuid = dbconnection(query, "select_one")
 
@@ -436,12 +437,12 @@ def set_software():
         "INSERT INTO new.software (company, software_name, software_version, software_type) "
         "VALUES ('Agisoft'::varchar,'Metashape'::varchar,'" + version + "'::varchar, 'Photogrammetry'::varchar) "
         "RETURNING uuid"
-        )
+      )
       software_uuid = dbconnection(query, "insert")
     return software_uuid[0]
 
 
-#-----------------------------------------------------------------
+# -----------------------------------------------------------------
 
 def set_processing(uuid):
   if mode == "db":
@@ -450,12 +451,12 @@ def set_processing(uuid):
 
     # Check if a processing entry linked to the capture and processing status entries exist
     query = (
-    "SELECT proc.uuid "
-    "FROM new.processing proc "
-    "JOIN new.capture_processing_link cp ON cp.processing_uuid = proc.uuid "
-    "JOIN new.capture cap ON cap.uuid = cp.capture_uuid "
-    "JOIN new.process_status ps ON ps.capture_uuid = cap.uuid "
-    "WHERE ps.uuid = '" + uuid + "'::uuid"
+      "SELECT proc.uuid "
+      "FROM new.processing proc "
+      "JOIN new.capture_processing_link cp ON cp.processing_uuid = proc.uuid "
+      "JOIN new.capture cap ON cap.uuid = cp.capture_uuid "
+      "JOIN new.process_status ps ON ps.capture_uuid = cap.uuid "
+      "WHERE ps.uuid = '" + uuid + "'::uuid"
     )
     global processing_uuid
     try:
@@ -475,7 +476,7 @@ def set_processing(uuid):
         "FROM new.capture cap "
         "JOIN new.process_status ps ON ps.capture_uuid = cap.uuid "
         "WHERE ps.uuid = '" + uuid + "';"
-        )
+      )
       dbconnection(query, "insert")
     else:
       # If the processing entry already exists, update it with the current software info
@@ -483,14 +484,14 @@ def set_processing(uuid):
         "UPDATE new.processing "
         "SET software = (SELECT ARRAY_AGG(DISTINCT e) FROM UNNEST(software || '{" + software_uuid + "}') e) "
         "WHERE new.processing.uuid = '" + processing_uuid + "' ;"
-        )
+      )
       dbconnection(query, "update")
     print()
     print("processing_uuid: " + str(processing_uuid))
     print("software_uuid: " + software_uuid)
     #return processing_uuid
 
-#-----------------------------------------------------------------
+# -----------------------------------------------------------------
 
 def pickfoldernamechunk():
   # Create a new chunk named from a selected a folder and add all photos from that folder
@@ -523,15 +524,15 @@ def pickfoldernamechunk():
   for chunk in list(doc.chunks):
     if not len(chunk.cameras):
       doc.remove(chunk)
-  
+
   ## Save project
   camera = chunk.cameras[0]
   date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
   #area = Metashape.app.getString(label = "Area mapped (for filename):", value = "Room")
   project_name = folder + "_" + date.strftime("%d%m%y") + ".psx"
   doc.save(path + "/" + project_name)
-    
-#-----------------------------------------------------------------
+
+# -----------------------------------------------------------------
 
 def loadfromdb():
   # Create a new chunk named from a selected a folder and add all photos from that folder
@@ -598,27 +599,27 @@ def loadfromdb():
   for chunk in list(doc.chunks):
     if not len(chunk.cameras):
       doc.remove(chunk)
-  
+
   #save project
   camera = doc.chunks[0].cameras[0]
   try:
     date = datetime.strptime(camera.photo.meta["Exif/DateTimeOriginal"], '%Y:%m:%d %H:%M:%S')
   except Exception as e:
     date = datetime.fromtimestamp(os.path.getmtime(photo_list[0]))
-    
+
   #area = Metashape.app.getString(label = "Area mapped (for filename):", value = "Room")
   project_name = folder + "_" + date.strftime("%d%m%y") + ".psx"
   doc.save(path + "/" + project_name)
   return uuid
-    
-#-----------------------------------------------------------------
+
+# -----------------------------------------------------------------
 
 # Calculate image quality and disable images with quality less than a specified variable.
 def estimagequality(threshold):
 
     # Calculate image quality and disable images with quality less than a specified variable.
   #chunk = doc.chunk
-    
+
   #tlabel = 'Quality theshold'
   #threshold = Metashape.app.getFloat(tlabel, value=0.6) # photos with image quality below this amount will be disabled.
   #threshold = iq_threshold
@@ -648,11 +649,11 @@ def estimagequality(threshold):
         camera.enabled = False
         print("Quality below threshold, camera disabled.")
     doc.save()
-   
+
   mlabel = 'Photos with image quality less than ' + str(threshold) + ' disabled. Project saved.'
   #Metashape.app.messageBox(mlabel)     # display msgbox when done
   print(mlabel)
-  
+
 # -----------------------------------------------------------------------
 def align():
   aligned_cameras = []
@@ -666,7 +667,7 @@ def align():
       if camera.transform!=None:
         aligned_cameras.append(camera)
   return len(aligned_cameras)
-    
+
 # -----------------------------------------------------------------------
 
 def poptargets():
@@ -783,12 +784,12 @@ def add_scalebars():
         if scalebar.reference.enabled:
           scalebar_list.append(scalebar)
   return len(scalebar_list)  
-#--------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------
 
-#uncheckmarkers #unchecks markers in a chunk with two or fewer projections.
+# uncheckmarkers #unchecks markers in a chunk with two or fewer projections.
 def uncheckmarkers():
   target_list = []
-  #unchecks markers in a chunk with two or fewer projections.
+  # unchecks markers in a chunk with two or fewer projections.
   for chunk in doc.chunks:
 
     for i in range(0, len(chunk.markers)):
@@ -799,7 +800,7 @@ def uncheckmarkers():
       if noproj < 3:
         marker.reference.enabled = False
         print(str(marker) + " disabled.")
-        
+
     doc.save()
     for marker in chunk.markers:
       if marker.reference.enabled:
@@ -810,24 +811,23 @@ def uncheckmarkers():
 
 # -----------------------------------------------------------------------
 
-#calculate average total error in metres
+# calculate average total error in metres
 def calc_error():
   error_list = []
   for chunk in doc.chunks:
     for marker in chunk.markers:
       try:
-        source = chunk.crs.unproject(marker.reference.location) #measured values in geocentric coordinates
-        estim = chunk.transform.matrix.mulp(marker.position) #estimated coordinates in geocentric coordinates
-        local = chunk.crs.localframe(chunk.transform.matrix.mulp(marker.position)) #local LSE coordinates
+        source = chunk.crs.unproject(marker.reference.location) # measured values in geocentric coordinates
+        estim = chunk.transform.matrix.mulp(marker.position) # estimated coordinates in geocentric coordinates
+        local = chunk.crs.localframe(chunk.transform.matrix.mulp(marker.position)) # local LSE coordinates
         error = local.mulv(estim - source)
-         
-        total = error.norm()      #error points
-        sum_squared = (total) ** 2    #Square root of error
-        error_list += [sum_squared]      #List with errors
+
+        total = error.norm()      # error points
+        sum_squared = (total) ** 2    # Square root of error
+        error_list += [sum_squared]      # List with errors
       except Exception as e:
         return 0
 
-       
   error_sum = sum(error_list)
   n = len(error_list)
   if n > 0:
@@ -837,30 +837,29 @@ def calc_error():
     return 0
 
 # -----------------------------------------------------------------------
-#alignbb2cs Aligns bounding boxes of all chunks to the grid
+# alignbb2cs Aligns bounding boxes of all chunks to the grid
 def alignbb2cs():
 
   for chunk in doc.chunks:
     T = chunk.transform.matrix
-    v_t = T * Metashape.Vector( [0,0,0,1] )
+    v_t = T * Metashape.Vector([0, 0, 0, 1])
     v_t.size = 3
     if chunk.crs:
       m = chunk.crs.localframe(v_t)
     else:
-      m = Metashape.Matrix().diag([1,1,1,1])
+      m = Metashape.Matrix().diag([1, 1, 1, 1])
     m = m * T
-    s = math.sqrt(m[0,0] ** 2 + m[0,1] ** 2 + m[0,2] ** 2) #scale factor
-    R = Metashape.Matrix( [[m[0,0],m[0,1],m[0,2]], [m[1,0],m[1,1],m[1,2]], [m[2,0],m[2,1],m[2,2]]])
+    s = math.sqrt(m[0, 0] ** 2 + m[0, 1] ** 2 + m[0, 2] ** 2) #scale factor
+    R = Metashape.Matrix( [[m[0, 0],m[0, 1],m[0, 2]], [m[1, 0],m[1, 1],m[1, 2]], [m[2, 0],m[2, 1],m[2, 2]]])
     R = R * (1. / s)
     reg = chunk.region
     reg.rot = R.t()
     chunk.region = reg
     doc.save()
   print("All bounding boxes aligned to grid. Project saved.")
-    
-#--------------------------------------------------------------------------------
 
-#Optimize alignemnts
+# --------------------------------------------------------------------------------
+# Optimize alignemnts
 def optimizealignments():
 
   for chunk in doc.chunks:
@@ -868,12 +867,12 @@ def optimizealignments():
       chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
     else:
       chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, fit_p1=True, fit_p2=True, fit_corrections=False, adaptive_fitting=False, tiepoint_covariance=True)
-        
+
     doc.save()
     print('Camera positions optimised for chunk ' + chunk.label + '. Project saved.')
-    
-#--------------------------------------------------------------------------------
-#Error reduction - Reconstruction Uncertainty
+
+# --------------------------------------------------------------------------------
+# Error reduction - Reconstruction Uncertainty
 def reconstructionuncertainty():
 
   for chunk in doc.chunks:
@@ -932,11 +931,11 @@ def reconstructionuncertainty():
       print(str(threshold) + " threshold reached")
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
-      print("Reconstruction Uncertainty filter completed")      
+      print("Reconstruction Uncertainty filter completed")
     #doc.save()
 
-#--------------------------------------------------------------------------------
-#Error reduction - Projection Accuracy
+# --------------------------------------------------------------------------------
+# Error reduction - Projection Accuracy
 def projectionaccuracy():
 
   for chunk in doc.chunks:
@@ -995,9 +994,9 @@ def projectionaccuracy():
       print(str(target) + " points removed")
       print("Projection Accuracy filter completed")      
     #doc.save()
-    
-#--------------------------------------------------------------------------------
-#Error reduction - Reprojection Error
+
+# --------------------------------------------------------------------------------
+# Error reduction - Reprojection Error
 def reproductionerror():
 
   for chunk in doc.chunks:
@@ -1054,12 +1053,12 @@ def reproductionerror():
       print(str(threshold) + " threshold reached")
       print(str(StartPoints) + " points at start")
       print(str(target) + " points removed")
-      print("Reprojection Error filter completed")      
-    #doc.save()        
-#--------------------------------------------------------------------------------
-#Build Depth Maps
+      print("Reprojection Error filter completed")
+    #doc.save()
+# --------------------------------------------------------------------------------
+# Build Depth Maps
 # This step could benefit from calibration..
-# - Check witch filter level is better for objects. 
+# - Check witch filter level is better for objects.
 # - Unsure about values for max neighbours (try 100 or -1), workitem size and max workgroup size.
 #
 # Note:
@@ -1085,162 +1084,163 @@ def depthmaps():
     if found_major_version <= 1.5:
       quality_attr = depthmap_quality + "Quality"
       chunk.buildDepthMaps(
-        quality=quality_attr, 
-        filter=depthmap_filter, 
+        quality=quality_attr,
+        filter=depthmap_filter,
         reuse_depth=True
-        )
+      )
     else:
       quality_attr = quality_map[depthmap_quality]
       chunk.buildDepthMaps(
-        downscale=quality_attr, 
-        filter_mode=getattr(Metashape, depthmap_filter), 
-        reuse_depth=True, max_neighbors=16, 
+        downscale=quality_attr,
+        filter_mode=getattr(Metashape, depthmap_filter),
+        reuse_depth=True, max_neighbors=16,
         subdivide_task=True, 
-        workitem_size_cameras=20, 
+        workitem_size_cameras=20,
         max_workgroup_size=100
-        )
-        
-    doc.save()
-    print('Depthmaps created for chunk ' + chunk.label + '. Project saved.')    
+      )
 
-#--------------------------------------------------------------------------------
-#
-#Build Dense Cloud
+    doc.save()
+    print('Depthmaps created for chunk ' + chunk.label + '. Project saved.')
+
+# --------------------------------------------------------------------------------
+# Build Dense Cloud
 def densecloud():
   for chunk in doc.chunks:
     if found_major_version <= 1.5: # Haven't checked older versions, both the same for now
       chunk.buildDenseCloud()
     elif found_major_version < 2:
       chunk.buildDenseCloud(
-        point_colors=True, 
-        point_confidence=False, 
-        keep_depth=True, 
+        point_colors=True,
+        point_confidence=False,
+        keep_depth=True,
         max_neighbors=100,
-        subdivide_task=True, 
-        workitem_size_cameras=20, 
+        subdivide_task=True,
+        workitem_size_cameras=20,
         max_workgroup_size=100
-        )
+      )
     else:
       chunk.buildPointCloud(
         point_colors=True, 
-        point_confidence=False, 
+        point_confidence=False,
         keep_depth=True, 
         max_neighbors=100,
         subdivide_task=True, 
-        workitem_size_cameras=20, 
+        workitem_size_cameras=20,
         max_workgroup_size=100
-        )
+      )
     doc.save()
     print('Dense cloud built for chunk ' + chunk.label + '. Project saved.')
 
 
-#--------------------------------------------------------------------------------
-#
-#Build Mesh
+# --------------------------------------------------------------------------------
+# Build Mesh
 def mesh():
 
   for chunk in doc.chunks:
-    if found_major_version <= 1.5: 
+    if found_major_version <= 1.5:
       chunk.buildModel(
-        surface_type = getattr(Metashape, surface_type),
-        interpolation = getattr(Metashape, interpolation),
-        face_count = face_count_custom,
-        source_data = getattr(Metashape, source_data),
-        vertex_colors = vertex_colors_bool
-        )
+        surface_type=getattr(Metashape, surface_type),
+        interpolation=getattr(Metashape, interpolation),
+        face_count=face_count_custom,
+        source_data=getattr(Metashape, source_data),
+        vertex_colors=vertex_colors_bool
+      )
     else:
       chunk.buildModel(
-        surface_type = getattr(Metashape, surface_type),
-        interpolation = getattr(Metashape, interpolation),
-        face_count_custom = face_count_custom,
-        source_data = getattr(Metashape, source_data),
-        vertex_colors = vertex_colors_bool,
-        vertex_confidence = vertex_confidence_bool
-        )
+        surface_type=getattr(Metashape, surface_type),
+        interpolation=getattr(Metashape, interpolation),
+        face_count_custom=face_count_custom,
+        source_data=getattr(Metashape, source_data),
+        vertex_colors=vertex_colors_bool,
+        vertex_confidence=vertex_confidence_bool
+      )
     doc.save()
     print('Mesh built for chunk ' + chunk.label + '. Project saved.')
 
 
-#--------------------------------------------------------------------------------
-#
-#Build UV Maps and Texture
-def texture(divider = 1):
+# --------------------------------------------------------------------------------
+# Build UV Maps and Texture
+def texture(divider=1):
 
   for chunk in doc.chunks:
     if found_major_version <= 1.5: # Haven't cheked older versions, both the same for now
-      chunk.buildUV(page_count = uv_pages, texture_size = texture_size)
-      chunk.buildTexture(texture_size = texture_size, ghosting_filter = ghosting_filter_bool)
+      chunk.buildUV(
+        page_count=uv_pages,
+        texture_size=texture_size
+      )
+      chunk.buildTexture(
+        texture_size=texture_size,
+        ghosting_filter=ghosting_filter_bool
+      )
     else:
       chunk.buildUV(
-        mapping_mode = Metashape.GenericMapping,
-        page_count = uv_pages, 
-        texture_size = texture_size / divider)
+        mapping_mode=Metashape.GenericMapping,
+        page_count=uv_pages,
+        texture_size=texture_size / divider
+      )
       chunk.buildTexture(
-        blending_mode = getattr(Metashape, blending_mode),
-        texture_size = texture_size / divider,
-        fill_holes = fill_holes_bool,
-        ghosting_filter = ghosting_filter_bool,
-        texture_type = getattr(Metashape.Model.TextureType, texture_type)
-        )
+        blending_mode=getattr(Metashape, blending_mode),
+        texture_size=texture_size / divider,
+        fill_holes=fill_holes_bool,
+        ghosting_filter=ghosting_filter_bool,
+        texture_type=getattr(Metashape.Model.TextureType, texture_type)
+      )
     doc.save()
     print('UV maps and texture created for chunk ' + chunk.label + '. Project saved.')
 
-#--------------------------------------------------------------------------------
-#
-#Build DEM
+# --------------------------------------------------------------------------------
+# Build DEM
 def dem():
 
   for chunk in doc.chunks:
     if found_major_version <= 1.5:
       chunk.buildDem(
-        source = getattr(Metashape, dem_datasource), 
-        interpolation = getattr(Metashape, dem_interpolation)
-        )
+        source=getattr(Metashape, dem_datasource),
+        interpolation=getattr(Metashape, dem_interpolation)
+      )
     else:
       # print(str(dem_params))
       # chunk.buildDem(**dem_params)
       chunk.buildDem(
-        source_data = getattr(Metashape, dem_datasource), 
-        interpolation = getattr(Metashape, dem_interpolation),  
-        resolution = dem_resolution, 
-        subdivide_task = True
-        )
+        source_data=getattr(Metashape, dem_datasource),
+        interpolation=getattr(Metashape, dem_interpolation),
+        resolution=dem_resolution, 
+        subdivide_task=True
+      )
 
 
     doc.save()
     print('DEM created for chunk ' + chunk.label + '. Project saved.')
 
-#--------------------------------------------------------------------------------
-#
-#Build Orthomosaic
+# --------------------------------------------------------------------------------
+# Build Orthomosaic
 def ortho():
 
   for chunk in doc.chunks:
     if found_major_version <= 1.5:
       chunk.buildOrthomosaic(
-        surface=getattr(Metashape, ortho_surfacedata), 
-        blending=getattr(Metashape, ortho_blending_mode), 
+        surface=getattr(Metashape, ortho_surfacedata),
+        blending=getattr(Metashape, ortho_blending_mode),
         fill_holes=ortho_fill_holes_bool,
         cull_faces=ortho_cull_faces_bool,
         refine_seamlines=ortho_refine_seamlines_bool
-        )
+      )
     else:
       chunk.buildOrthomosaic(
-        surface_data = getattr(Metashape, ortho_surfacedata),
-        blending_mode = getattr(Metashape, ortho_blending_mode),
-        fill_holes = ortho_fill_holes_bool,
-        ghosting_filter = ortho_ghosting_filter_bool,
-        cull_faces = ortho_cull_faces_bool,
-        refine_seamlines = ortho_refine_seamlines_bool,
-        resolution = ortho_resolution
-        )
+        surface_data=getattr(Metashape, ortho_surfacedata),
+        blending_mode=getattr(Metashape, ortho_blending_mode),
+        fill_holes=ortho_fill_holes_bool,
+        ghosting_filter=ortho_ghosting_filter_bool,
+        cull_faces=ortho_cull_faces_bool,
+        refine_seamlines=ortho_refine_seamlines_bool,
+        resolution=ortho_resolution
+      )
 
     doc.save()
     print('Orthomosaic created for chunk ' + chunk.label + '. Project saved.')
 
-#--------------------------------------------------------------------------------
-#
-#Export data
+# --------------------------------------------------------------------------------
+# Export data
 def export():
   output_folder = path + '/exports/'
   if not os.path.exists(output_folder):
@@ -1258,7 +1258,7 @@ def export():
   if short_coords:
     print("Shortcoords: " + str(short_coords))
     short_coord_file = path + "/short_coords.csv"     # Path to the folder and target file name to write and read.
-    #short_coord_dict = json.loads(short_coords)
+    # short_coord_dict = json.loads(short_coords)
 
   # Write short coords to csv in project folder
     with open(short_coord_file, "w") as f:
@@ -1268,9 +1268,9 @@ def export():
     print("Shorthened coordinate data saved to " + short_coord_file)
 
   # Apply to ply export (with decimated mesh?) for use by meshlab and 3dhop
-    shiftCoords =  Metashape.Vector( (short_coords['x'], short_coords['y'], short_coords['z']) )
+    shiftCoords = Metashape.Vector((short_coords['x'], short_coords['y'], short_coords['z']))
   else:
-    shiftCoords =  Metashape.Vector( 0, 0, 0)
+    shiftCoords = Metashape.Vector(0, 0, 0)
 
   # Def formats
   ply = Metashape.ModelFormatPLY
@@ -1286,37 +1286,37 @@ def export():
       if chunk.point_cloud:
         filename_densepoint = output_folder + 'pointcloud_' + processing_uuid + '.las'
         chunk.exportPointCloud(
-          filename_densepoint, 
-          source_data = Metashape.PointCloudData
-          )      
+          filename_densepoint,
+          source_data=Metashape.PointCloudData
+        )
     elif found_major_version < 2:
       filename_report = output_folder + 'report_' + processing_uuid + '.pdf'
       chunk.exportReport(
-        path = filename_report,  
-        title = folder, 
-        description = processing_uuid
-        #user_settings = settings
-        )
+        path=filename_report,
+        title=folder,
+        description=processing_uuid
+        # user_settings = settings
+      )
       print("Report exported as " + filename_report)
 
       if chunk.model:
         filename_model = output_folder + 'model_' + processing_uuid + '.obj'
         chunk.exportModel(
           filename_model,
-          binary = False,  
-          clip_to_boundary=False, 
-          precision=6, 
-          save_texture=True, 
-          embed_texture=True, 
-          save_normals=True, 
-          save_colors=True, 
-          save_cameras=True, 
-          strip_extensions=False, 
-          format = obj, 
-          crs = crs, 
-          comment = comment, 
-          save_comment = True
-          )
+          binary=False,
+          clip_to_boundary=False,
+          precision=6,
+          save_texture=True,
+          embed_texture=True,
+          save_normals=True,
+          save_colors=True,
+          save_cameras=True,
+          strip_extensions=False,
+          format=obj,
+          crs=crs,
+          comment=comment,
+          save_comment=True
+        )
         print()
         print("Model exported as " + filename_model)
         duplicateMesh = Metashape.Tasks.DuplicateAsset()
@@ -1330,19 +1330,19 @@ def export():
         decimated_model = output_folder + 'model_shortcoords_' + processing_uuid
         filename_decimated_model = decimated_model + '.ply'
         chunk.exportModel(
-          filename_decimated_model, 
-          binary=True, 
-          clip_to_boundary=False,  
-          save_texture=True, 
-          embed_texture=True, 
-          save_normals=True, 
-          save_colors=True, 
-          save_cameras=True, 
-          strip_extensions=False, 
-          format=ply, 
-          crs=crs, 
+          filename_decimated_model,
+          binary=True,
+          clip_to_boundary=False,
+          save_texture=True,
+          embed_texture=True,
+          save_normals=True,
+          save_colors=True,
+          save_cameras=True,
+          strip_extensions=False,
+          format=ply,
+          crs=crs,
           shift=shiftCoords
-          )
+        )
         print()
         print("Decimated model with shortened coordinates exported as " + filename_decimated_model)
 
@@ -1350,35 +1350,35 @@ def export():
         filename_densepoint = output_folder + 'pointcloud_' + processing_uuid + '.las'
         chunk.exportPoints(
           filename_densepoint, 
-          source_data = Metashape.DenseCloudData,
+          source_data=Metashape.DenseCloudData,
           save_normals=True,
           save_colors=True,
           save_confidence=True,
-          format= Metashape.PointsFormatLAZ,
-          crs = crs,
-          comment = comment
-          )
+          format=Metashape.PointsFormatLAZ,
+          crs=crs,
+          comment=comment
+        )
 
       if chunk.elevation:
         filename_dem = output_folder + 'dem_' + processing_uuid + '.tif'
         chunk.exportRaster(
           filename_dem, 
           source_data = Metashape.ElevationData
-          )
+        )
 
       if chunk.orthomosaic:
         filename_ortho = output_folder + 'ortho_' + processing_uuid + '.tif'
         chunk.exportRaster(
-          filename_ortho, 
-          source_data = Metashape.OrthomosaicData
-          )
+          filename_ortho,
+          source_data=Metashape.OrthomosaicData
+        )
     else:
       filename_report = output_folder + 'report_' + processing_uuid + '.pdf'
       chunk.exportReport(
-        path = filename_report,  
-        title = folder, 
-        description = processing_uuid
-        #user_settings = settings
+        path=filename_report,
+        title=folder,
+        description=processing_uuid
+        #user_settings=settings
         )
       print("Report exported as " + filename_report)
 
@@ -1386,20 +1386,20 @@ def export():
         filename_model = output_folder + 'model_' + processing_uuid + '.obj'
         chunk.exportModel(
           filename_model,
-          binary = False,  
-          clip_to_boundary=False, 
-          precision=6, 
-          save_texture=True, 
-          embed_texture=True, 
-          save_normals=True, 
-          save_colors=True, 
-          save_cameras=True, 
-          strip_extensions=False, 
-          format = obj, 
-          crs = crs, 
-          comment = comment, 
-          save_comment = True
-          )
+          binary=False,
+          clip_to_boundary=False,
+          precision=6,
+          save_texture=True,
+          embed_texture=True,
+          save_normals=True,
+          save_colors=True,
+          save_cameras=True,
+          strip_extensions=False,
+          format=obj,
+          crs=crs,
+          comment=comment,
+          save_comment=True
+        )
         print()
         print("Model exported as " + filename_model)
         duplicateMesh = Metashape.Tasks.DuplicateAsset()
@@ -1482,16 +1482,14 @@ def export():
   finally:
     build_nxz = "nxsedit -z " + extless_filename_model + ".nxs -o " + extless_filename_model + ".nxz"
     subprocess.run(build_nxz, shell=True)
-  
-  
 
 
-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#  Run script #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+# #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-# #
+# #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-# Run script  #-#-#-#-#-#-#-#-#-#-#-#-#-#-# #
+# #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-# #
 
 def run(runmode):
-  
+
   global mode
   mode = runmode
 
@@ -1504,10 +1502,10 @@ def run(runmode):
   elif mode == "db":
     print("Mode: PostgreSQL database.")
     loadfromdb()
-    set_processing(uuid)  
+    set_processing(uuid)
   # Get/set variables
   vars(uuid)
-  
+
   # Estimate image quality
   if est_iq_bool:
     print("")
@@ -1527,8 +1525,8 @@ def run(runmode):
         update_status(uuid, "estimating_iq", "failed")
       else:
         update_status(uuid, "estimating_iq", "done")
-  
-  # Align images  
+
+  # Align images
   if align_bool:
     print("")
     print("***** Aligning Images *****")
@@ -1548,8 +1546,7 @@ def run(runmode):
       else:
         update_processing(processing_uuid, "images_aligned", images_aligned)
         update_status(uuid, "aligning", "done")
-  
-  
+
   # Populate targets
   if poptargets_bool:
     print("")
@@ -1577,7 +1574,7 @@ def run(runmode):
   if uncheckmarkers_bool:
     print("")
     print("***** Unchecking Markers *****")
-    print("")    
+    print("")
     if get_status(uuid, "uncheckingmarkers") in ["done", "skip"]:
       print("Target population already done. Skipping.\n")
     else:
@@ -1592,7 +1589,7 @@ def run(runmode):
         print()
         update_status(uuid, "uncheckingmarkers", "failed")
       else:
-        print(str(targets_used) + " targets used.") 
+        print(str(targets_used) + " targets used.")
         update_processing(processing_uuid, "targets_used", targets_used)
         update_processing(processing_uuid, "estimated_error", error)
         update_status(uuid, "uncheckingmarkers", "done")
@@ -1617,13 +1614,13 @@ def run(runmode):
       else:
         print(str(scalebars_used) + " scalebars used.")
         update_processing(processing_uuid, "scalebars_used", scalebars_used)
-        update_status(uuid, "adding_scalebars", "done")        
-  
+        update_status(uuid, "adding_scalebars", "done")
+
   # Align Bounding boxes to grid
   if alignbbox_bool:
     print("")
     print("***** Aligning Bounding Box *****")
-    print("")    
+    print("")
     if get_status(uuid, "aligning_bbox") in ["done", "skip"]:
       print("Bounding boxes already aligned to grid. Skipping.\n")
     else:
@@ -1638,12 +1635,12 @@ def run(runmode):
         update_status(uuid, "aligning_bbox", "failed")
       else:
         update_status(uuid, "aligning_bbox", "done")
-  
+
   # Optimise alignment (first time)
   if optimizealignment_bool:
     print("")
     print("***** Optimising Alignment *****")
-    print("")    
+    print("")
     if get_status(uuid, "optimizing_alignment") in ["done", "skip"]:
       print("Alignment already optimised. Skipping.\n")
     else:
@@ -1660,12 +1657,12 @@ def run(runmode):
         error = calc_error()
         update_processing(processing_uuid, "estimated_error", error)
         update_status(uuid, "optimizing_alignment", "done")
-      
+
   # Reducing errors and re-optimising alignment
   if err_red_bool:
     print("")
     print("***** Running Error Reduction Algorithms *****")
-    print("")    
+    print("")
     if get_status(uuid, "reducing_error") in ["done", "skip"]:
       print("Error reduction already done. Skipping.\n")
     else:
@@ -1687,12 +1684,12 @@ def run(runmode):
         error = calc_error()
         update_processing(processing_uuid, "estimated_error", error)
         update_status(uuid, "reducing_error", "done")
-  
+
   # Build Depth Maps
   if depthmap_bool:
     print("")
     print("***** Building Depthmaps *****")
-    print("")    
+    print("")
     if get_status(uuid, "building_depthmaps") in ["done", "skip"]:
       print("Depthmaps already built. Skipping.\n")
     else:
@@ -1708,12 +1705,12 @@ def run(runmode):
       else:
         update_processing(processing_uuid, "depth_maps_created", "true")
         update_status(uuid, "building_depthmaps", "done")
-  
+
   # Build Dense Cloud
   if densecloud_bool:
     print("")
     print("***** Building Dense Cloud *****")
-    print("")    
+    print("")
     if get_status(uuid, "building_densecloud") in ["done", "skip"]:
       print("Dense cloud already built. Skipping.\n")
     else:
@@ -1729,12 +1726,12 @@ def run(runmode):
       else:
         update_processing(processing_uuid, "dense_point_cloud_created", "true")
         update_status(uuid, "building_densecloud", "done")
-  
+
   # Build Mesh
   if mesh_bool:
     print("")
     print("***** Creating Mesh *****")
-    print("")    
+    print("")
     if get_status(uuid, "meshing") in ["done", "skip"]:
       print("Mesh already built. Skipping.\n")
     else:
@@ -1750,12 +1747,12 @@ def run(runmode):
       else:
         update_processing(processing_uuid, "mesh_created", "true")
         update_status(uuid, "meshing", "done")
-  
+
   # Build Texture
   if texture_bool:
     print("")
     print("***** Creating Texture *****")
-    print("")    
+    print("")
     if get_status(uuid, "texturing") in ["done", "skip"]:
       print("Mesh already built. Skipping.\n")
     else:
@@ -1771,12 +1768,12 @@ def run(runmode):
       else:
         update_processing(processing_uuid, "texture_created", "true")
         update_status(uuid, "texturing", "done")
-  
+
   # DEM
   if dem_bool:
     print("")
     print("***** Building DEM *****")
-    print("")    
+    print("")
     if get_status(uuid, "building_dem") in ["done", "skip"]:
       print("DEM already made. Skipping.\n")
     else:
@@ -1792,12 +1789,12 @@ def run(runmode):
       else:
         update_processing(processing_uuid, "dem_created", "true")
         update_status(uuid, "building_dem", "done")
-  
+
   # Orthophoto
   if ortho_bool:
     print("")
     print("***** Building Orthomosaic *****")
-    print("")    
+    print("")
     if get_status(uuid, "building_ortho") in ["done", "skip"]:
       print("Orthomosaic already made. Skipping.\n")
     else:
@@ -1812,17 +1809,16 @@ def run(runmode):
         update_status(uuid, "building_ortho", "failed")
       else:      
         update_processing(processing_uuid, "orthophoto_created", "true")
-        update_status(uuid, "building_ortho", "done")      
-  
+        update_status(uuid, "building_ortho", "done")
+
   # Decimate mesh
-  
-  
-  
+
+
   # Exports
   if export_bool:
     print("")
     print("***** Exporting results *****")
-    print("")    
+    print("")
     if get_status(uuid, "exporting") in ["done", "skip"]:
       print("Exports already done. Skipping.\n")
     else:
@@ -1837,7 +1833,7 @@ def run(runmode):
         update_status(uuid, "exporting", "failed")
       else:
         update_status(uuid, "exporting", "done")
-      
+
   return uuid
 
 

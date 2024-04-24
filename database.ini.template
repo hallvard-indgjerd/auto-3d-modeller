@@ -1,0 +1,5 @@
+[postgresql]
+host=postgres-host
+database=postgres-database
+user=postgres-user
+password=postgres-password
